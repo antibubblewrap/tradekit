@@ -1,0 +1,130 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"time"
+
+	"github.com/antibubblewrap/tradekit"
+	"github.com/antibubblewrap/tradekit/bybit"
+	"github.com/antibubblewrap/tradekit/deribit"
+)
+
+func startBybitOrderbookStream(ctx context.Context, market bybit.Market, symbol string, depth int) *bybit.OrderbookStream {
+	stream, err := bybit.NewOrderbookStream(market, depth, symbol)
+	if err != nil {
+		panic(err)
+	}
+	if err := stream.Start(ctx); err != nil {
+		panic(err)
+	}
+	fmt.Println("ByBit book stream connected")
+	return stream
+}
+
+func startBybitTradeStream(ctx context.Context, market bybit.Market, symbol string) *bybit.TradeStream {
+	stream, err := bybit.NewTradeStream(market, symbol)
+	if err != nil {
+		panic(err)
+	}
+	if err := stream.Start(ctx); err != nil {
+		panic(err)
+	}
+	fmt.Println("Bybit trade stream connected")
+	return stream
+}
+
+func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribit.OrderbookStream {
+	stream, err := deribit.NewOrderbookStream(deribit.ProdEventNode, instrument, deribit.UpdateRaw)
+	if err != nil {
+		panic(err)
+	}
+	if err := stream.Start(ctx); err != nil {
+		panic(err)
+	}
+	fmt.Println("Deribit order book stream connected")
+	return stream
+}
+
+func startDeribitTradeStream(ctx context.Context, instrument string) *deribit.TradeStream {
+	stream, err := deribit.NewTradeStream(deribit.ProdEventNode, instrument, deribit.UpdateRaw)
+	if err != nil {
+		panic(err)
+	}
+	if err := stream.Start(ctx); err != nil {
+		panic(err)
+	}
+	fmt.Println("Deribit trade stream connected")
+	return stream
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	market := bybit.Linear
+	bybitBookStream := startBybitOrderbookStream(ctx, market, "BTCUSDT", 200)
+	bybitTradeStream := startBybitTradeStream(ctx, market, "BTCUSDT")
+	bybit1mVolume := tradekit.NewRollingSum(time.Minute)
+
+	deribitBookStream := startDeribitOrderbookStream(ctx, "BTC-PERPETUAL")
+	deribitTradeStream := startDeribitTradeStream(ctx, "BTC-PERPETUAL")
+	deribitMidPriceEWMA := tradekit.NewEWMA(time.Minute)
+
+	bybitBook := tradekit.NewOrderbook(nil, nil)
+	deribitBook := tradekit.NewOrderbook(nil, nil)
+
+	n := 0
+	elapsed := 0
+	ticker := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-bybitBookStream.Messages():
+			if msg.Type == "snapshot" {
+				bybitBook.UpdateSnapshot(msg.Data.Bids, msg.Data.Asks)
+			} else {
+				start := time.Now()
+				bybitBook.UpdateBids(msg.Data.Bids)
+				bybitBook.UpdateAsks(msg.Data.Asks)
+				n += len(msg.Data.Asks) + len(msg.Data.Bids)
+				elapsed += int(time.Since(start).Nanoseconds())
+			}
+			if n >= 1000 {
+				avg := elapsed / n
+				fmt.Printf("Bybit avg book update speed = %dns (%d)\n", avg, n)
+				elapsed = 0
+				n = 0
+			}
+		case msg := <-bybitTradeStream.Messages():
+			for _, trade := range msg.Data {
+				bybit1mVolume.Update(trade.Amount)
+			}
+		case msg := <-deribitBookStream.Messages():
+			if msg.Type == "snapshot" {
+				deribitBook.UpdateSnapshot(msg.Bids, msg.Asks)
+			} else {
+				deribitBook.UpdateBids(msg.Bids)
+				deribitBook.UpdateAsks(msg.Asks)
+			}
+			deribitMidPriceEWMA.Update(deribitBook.MidPrice(), msg.Timestamp)
+		case _ = <-deribitTradeStream.Messages():
+			// Do something with the trade message
+			continue
+		case <-ticker.C:
+			fmt.Printf("Deribit midprice 1 min EWMA = %.2f\n", deribitMidPriceEWMA.Value)
+			fmt.Printf("Bybit 1 min rolling volume = %.2f\n", bybit1mVolume.Value())
+		case err := <-bybitBookStream.Err():
+			panic(err)
+		case err := <-bybitTradeStream.Err():
+			panic(err)
+		case err := <-deribitBookStream.Err():
+			panic(err)
+		case err := <-deribitTradeStream.Err():
+			panic(err)
+		}
+	}
+}
