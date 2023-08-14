@@ -1,7 +1,9 @@
 package websocket
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"sync"
 	"time"
 
@@ -21,17 +23,20 @@ func connect(ctx context.Context, url string) (*websocket.Conn, error) {
 	sleep := time.Second
 	var err error
 	var conn *websocket.Conn
+loop:
 	for i := 0; i < 10; i++ {
 		select {
 		case <-ctx.Done():
-			break
+			break loop
 		default:
-			conn, _, err = websocket.DefaultDialer.DialContext(ctx, url, nil)
+			dialer := websocket.DefaultDialer
+			dialer.EnableCompression = true
+			conn, _, err = dialer.DialContext(ctx, url, nil)
 			if err != nil {
 				sleepCtx(ctx, sleep)
 				sleep *= 2
 			} else {
-				break
+				break loop
 			}
 		}
 	}
@@ -43,10 +48,46 @@ func connect(ctx context.Context, url string) (*websocket.Conn, error) {
 	return conn, err
 }
 
+// Message is the data produced by the websocket.
+type Message struct {
+	buf  *bytes.Buffer
+	pool *bufferPool
+}
+
+// Data returns the data stored in a Message. The byte slice should not be used after
+// Release is called on a message.
+func (m Message) Data() []byte {
+	return m.buf.Bytes()
+}
+
+// Release *must* be called once you are finished with a message.
+func (m Message) Release() {
+	m.pool.put(m.buf)
+}
+
+type Options struct {
+	// PoolSize defines the size of the pool of pre-allocated buffers for storing data
+	// received from the websocket connection. If not set, it will be set to 32 by
+	// default.
+	PoolSize int
+	// BufCapacity sets the initial capacity of buffers in the websocket's buffer pool.
+	// You should set this to be larger than the typical size of a message from the
+	// specific websocket connection to reduce the number of memory allocations. If not
+	// set, it will be set to 2048 bytes by default.
+	BufCapacity int
+}
+
+var defaultOptions Options = Options{
+	PoolSize:    32,
+	BufCapacity: 2048,
+}
+
+// Websocket handles a websocket client connection to a given URL.
 type Websocket struct {
 	Url           string
 	conn          *websocket.Conn
-	responses     chan []byte
+	bufPool       *bufferPool
+	responses     chan Message
 	requests      chan []byte
 	close         chan struct{}
 	errc          chan error
@@ -57,10 +98,20 @@ type Websocket struct {
 	PingInterval  time.Duration
 }
 
-func New(url string) Websocket {
+func New(url string, opts *Options) Websocket {
+	if opts == nil {
+		opts = &defaultOptions
+	}
+	if opts.BufCapacity == 0 {
+		opts.BufCapacity = defaultOptions.BufCapacity
+	}
+	if opts.PoolSize == 0 {
+		opts.PoolSize = defaultOptions.PoolSize
+	}
 	return Websocket{
 		Url:           url,
-		responses:     make(chan []byte, 10),
+		bufPool:       newBufferPool(opts.PoolSize, opts.BufCapacity),
+		responses:     make(chan Message, 10),
 		requests:      make(chan []byte, 10),
 		close:         make(chan struct{}, 1),
 		OnConnect:     func() error { return nil },
@@ -81,6 +132,9 @@ func (ws *Websocket) connect(ctx context.Context) error {
 	return nil
 }
 
+// Start the websocket connection. This function creates the websocket connection and
+// immediately begins reading messages sent by the server. Start must be called before
+// any messages can be received by the consumer.
 func (ws *Websocket) Start(ctx context.Context) error {
 	defer ws.wg.Done()
 	if err := ws.connect(ctx); err != nil {
@@ -93,7 +147,7 @@ func (ws *Websocket) Start(ctx context.Context) error {
 		defer ws.wg.Done()
 		defer close(ws.responses)
 		for {
-			_, msg, err := ws.conn.ReadMessage()
+			_, r, err := ws.conn.NextReader()
 			if err != nil {
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 					ws.closed = true
@@ -112,6 +166,14 @@ func (ws *Websocket) Start(ctx context.Context) error {
 					return
 				}
 			}
+			buf := ws.bufPool.get()
+			_, err = io.Copy(buf, r)
+			if err != nil {
+				ws.bufPool.put(buf)
+				ws.errc <- err
+				return
+			}
+			msg := Message{buf: buf, pool: ws.bufPool}
 			ws.responses <- msg
 		}
 	}()
@@ -127,7 +189,6 @@ func (ws *Websocket) Start(ctx context.Context) error {
 
 	resetTicker := time.NewTicker(ws.ResetInterval)
 	pingTicker := time.NewTicker(ws.PingInterval)
-	pingC := make(chan struct{})
 
 	ws.wg.Add(1)
 	go func() {
@@ -143,26 +204,13 @@ func (ws *Websocket) Start(ctx context.Context) error {
 				}
 			case <-pingTicker.C:
 				if !isConnecting {
-					pingC <- struct{}{}
+					ws.conn.WriteMessage(websocket.PingMessage, nil)
 				}
 			case <-ws.close:
 				ws.conn.WritePreparedMessage(closeNormalMsg)
 				return
-			}
-		}
-	}()
-
-	ws.wg.Add(1)
-	go func() {
-		defer ws.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
 			case msg := <-ws.requests:
 				ws.conn.WriteMessage(websocket.TextMessage, msg)
-			case <-pingC:
-				ws.conn.WriteMessage(websocket.PingMessage, nil)
 			}
 		}
 	}()
@@ -170,14 +218,20 @@ func (ws *Websocket) Start(ctx context.Context) error {
 	return nil
 }
 
+// Send a text message along the websocket.
 func (ws *Websocket) Send(data []byte) {
 	ws.requests <- data
 }
 
-func (ws *Websocket) Messages() <-chan []byte {
+// Messages returns a channel containing the messages received from the websocket. Each
+// Message received should be released back to the websocket's buffer pool by calling
+// Release once you are finished with the message.
+func (ws *Websocket) Messages() <-chan Message {
 	return ws.responses
 }
 
+// Close sends a closes the websocket connection. The Messages channel is closed once
+// the close frame has been acknowledged by the server.
 func (ws *Websocket) Close() {
 	if ws.closed {
 		return
@@ -189,8 +243,3 @@ func (ws *Websocket) Close() {
 func (ws *Websocket) Err() <-chan error {
 	return ws.errc
 }
-
-// func (ws *Websocket) Err() error {
-// 	ws.wg.Wait()
-// 	return ws.err
-// }

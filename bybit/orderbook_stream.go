@@ -24,7 +24,7 @@ func NewOrderbookStream(market Market, depth int, symbol string) (*OrderbookStre
 		return nil, fmt.Errorf("creating Bybit OrderbookStream: %w", err)
 	}
 
-	ws := websocket.New(url)
+	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		channel := fmt.Sprintf("orderbook.%d.%s", depth, symbol)
@@ -55,7 +55,7 @@ type OrderbookMsgData struct {
 	// Update Id. Increment sequentially. Snapshots have update ID 1.
 	UpdateId int64 `json:"u"`
 	// Cross sequence.
-	Seq int64
+	Seq int64 `json:"seq"`
 }
 
 // OrderbookMsg is of the messages produced by the OrderbookStream.
@@ -87,19 +87,23 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 			select {
 			case data := <-s.ws.Messages():
 				var msg OrderbookMsg
-				if err := json.Unmarshal(data, &msg); err != nil {
-					s.errc <- err
+				if err := json.Unmarshal(data.Data(), &msg); err != nil {
+					s.errc <- fmt.Errorf("deserializing Bybit orderbook message: %w (%s)", err, string(data.Data()))
+					data.Release()
 					return
 				}
 				if msg.Topic == "" {
-					if !isPingResponseMsg(data) {
+					if !isPingResponseMsg(data.Data()) {
 						// It should be the subscription response
-						if err := checkSubscribeResponse(data); err != nil {
+						if err := checkSubscribeResponse(data.Data()); err != nil {
 							s.errc <- err
+							data.Release()
 							return
 						}
 					}
+					data.Release()
 				} else {
+					data.Release()
 					s.msgs <- msg
 				}
 			case <-ticker.C:

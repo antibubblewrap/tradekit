@@ -22,7 +22,7 @@ func NewOrderbookStream(t ConnectionType, instrument string, freq UpdateFrequenc
 		return nil, err
 	}
 
-	ws := websocket.New(url)
+	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		subMsg, err := newSubscribeMsg([]string{fmt.Sprintf("book.%s.%s", instrument, freq)})
@@ -109,17 +109,20 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				subMsg, err := parseSubscriptionMsg(data)
+				subMsg, err := parseSubscriptionMsg(data.Data())
 				if err != nil {
 					s.errc <- err
+					data.Release()
 					return
 				}
 				if subMsg.Method != "" {
 					msg, err := parseOrderbookMsg(subMsg.Params.Data)
 					if err != nil {
-						s.errc <- err
+						s.errc <- fmt.Errorf("deserializing Deribit order book message: %w (%s)", err, string(data.Data()))
+						data.Release()
 						return
 					}
+					data.Release()
 					s.msgs <- msg
 				}
 			case err := <-s.ws.Err():

@@ -16,6 +16,7 @@ go get -u github.com/antibubblewrap/tradekit
   - Orderbook metrics — spread, liquidity, market impact. More metrics will be added in
     the future. Custom metrics may be efficient implemented with the `book.IterBids()` and
     `book.IterAsks()` methods.
+  - Websocket connections with low to zero memory allocation overhead.
   - Bybit market data stream connections. Compatible with the `Orderbook` data type.
   - Deribit market data stream connections. Compatible with the `Orderbook` data type.
   - Stats: exponential moving average, rolling sums, etc.
