@@ -11,11 +11,6 @@ type Ordered interface {
 		~string
 }
 
-type level struct {
-	price    int64
-	quantity int64
-}
-
 // Entry stores a key-value pair in an ArrayMap.
 type Entry[K Ordered, V any] struct {
 	Key   K
@@ -30,7 +25,6 @@ type chunk[K Ordered, V any] struct {
 	entries []Entry[K, V]
 	min     K
 	max     K
-	start   int
 	end     int
 	empty   bool
 }
@@ -42,6 +36,13 @@ func newChunk[K Ordered, V any](chunkSize int) chunk[K, V] {
 	}
 }
 
+func (c *chunk[K, V]) slice() []Entry[K, V] {
+	if c.len() == 0 {
+		return c.entries[0:0]
+	}
+	return c.entries[:c.end+1]
+}
+
 func (c *chunk[K, V]) insertAt(i int, e Entry[K, V]) {
 	copy(c.entries[i+1:], c.entries[i:c.end+1])
 	c.entries[i] = e
@@ -51,11 +52,9 @@ func (c *chunk[K, V]) insertAt(i int, e Entry[K, V]) {
 // pop removes the element at the given index in the chunk, shifting all elements to
 // its right to the left by 1.
 func (c *chunk[K, V]) pop(index int) {
-	for i := index; i < c.end; i++ {
-		c.entries[i] = c.entries[i+1]
-	}
-	if index == c.start {
-		c.min = c.entries[c.start].Key
+	copy(c.entries[index:c.end+1], c.entries[index+1:c.end+1])
+	if index == 0 {
+		c.min = c.entries[0].Key
 	}
 	var zero Entry[K, V]
 	c.entries[c.end] = zero
@@ -67,7 +66,7 @@ func (c *chunk[K, V]) len() int {
 	if c.empty {
 		return 0
 	}
-	return (c.end - c.start) + 1
+	return c.end + 1
 }
 
 func (c *chunk[K, V]) isFull() bool {
@@ -78,7 +77,7 @@ func (c *chunk[K, V]) isFull() bool {
 // are greater than the values in the current chunk, and that the current chunk has enough
 // capacity.
 func (c *chunk[K, V]) merge(other *chunk[K, V]) {
-	copy(c.entries[c.end+1:], other.entries[other.start:other.end+1])
+	copy(c.entries[c.end+1:], other.entries[:other.end+1])
 	c.end += other.len()
 	c.max = other.max
 }
@@ -90,16 +89,15 @@ func (c *chunk[K, V]) split() chunk[K, V] {
 
 	// copy the right side half of the current chunk over to the new chunk
 	newC := newChunk[K, V](len(c.entries))
-	newEntries := c.entries[c.start+n : c.end+1]
+	newEntries := c.entries[n : c.end+1]
 	copy(newC.entries, newEntries)
-	newC.start = 0
 	newC.end = len(newEntries) - 1
-	newC.min = newEntries[newC.start].Key
+	newC.min = newEntries[0].Key
 	newC.max = newEntries[newC.end].Key
 	newC.empty = false
 
 	// zero the right side half of the current chunk
-	c.end = c.start + n - 1
+	c.end = n - 1
 	c.max = c.entries[c.end].Key
 	var zero Entry[K, V]
 	for i := c.end + 1; i < len(c.entries); i++ {
@@ -161,7 +159,7 @@ func (c *chunk[K, V]) insert(k K, v V) *chunk[K, V] {
 	// sizes (at least up to 64) compared to a binary search. We could switch decide
 	// between linear and binary searches based on the chunk size, but leaving it at
 	// linear for now.
-	for i := c.start; i <= c.end; i++ {
+	for i := 0; i <= c.end; i++ {
 		e := c.entries[i]
 		if e.Key == k {
 			c.entries[i] = entry(k, v)
@@ -193,23 +191,21 @@ func (c *chunk[K, V]) delete(k K) bool {
 		return false
 	}
 	if k == c.min {
-		var zero Entry[K, V]
-		c.entries[c.start] = zero
 		if n == 1 {
+			var zero K
 			c.empty = true
-			c.start = 0
 			c.end = 0
-			c.min = zero.Key
-			c.max = zero.Key
+			c.min = zero
+			c.max = zero
 		} else {
 			c.pop(0)
 		}
 		return true
-	}
-	if k == c.max {
+	} else if k == c.max {
 		c.pop(c.end)
+		return true
 	}
-	for i := c.start + 1; i <= c.end-1; i++ {
+	for i := 1; i <= c.end-1; i++ {
 		e := c.entries[i]
 		if k == e.Key {
 			c.pop(i)
@@ -226,7 +222,7 @@ func (c *chunk[K, V]) get(k K) (V, bool) {
 	if k < c.min || k > c.max {
 		return zero, false
 	}
-	for _, entry := range c.entries[c.start : c.end+1] {
+	for _, entry := range c.entries[:c.end+1] {
 		if entry.Key == k {
 			return entry.Value, true
 		}
@@ -239,7 +235,7 @@ func (c *chunk[K, V]) first() (Entry[K, V], bool) {
 		var zero Entry[K, V]
 		return zero, false
 	}
-	return c.entries[c.start], true
+	return c.entries[0], true
 }
 
 // An ArrayMap is an ordered map. It balances CPU cache-efficiency and insert/update/delete
@@ -344,7 +340,7 @@ func (m *ArrayMap[K, V]) compact() {
 		}
 		cur := m.chunks[i]
 		next := m.chunks[i+1]
-		if float64(cur.len()+next.len()) < 2.0/3.0*float64(m.chunkSize) {
+		if float64(cur.len()+next.len()) < 0.75*float64(m.chunkSize) {
 			cur.merge(next)
 			m.removeChunk(i + 1)
 		}
@@ -380,7 +376,7 @@ func (m *ArrayMap[K, V]) Iter() *IterMap[K, V] {
 		m:        m,
 		curChunk: m.chunks[0],
 		chunkIdx: 0,
-		entryIdx: m.chunks[0].start,
+		entryIdx: 0,
 	}
 }
 
@@ -408,7 +404,7 @@ func (it *IterMap[K, V]) Next() (Entry[K, V], bool) {
 		} else {
 			it.chunkIdx += 1
 			it.curChunk = it.m.chunks[it.chunkIdx]
-			it.entryIdx = it.curChunk.start
+			it.entryIdx = 0
 		}
 	} else {
 		it.entryIdx += 1
