@@ -35,7 +35,7 @@ func NewTradeStream(t ConnectionType, instrument string, freq UpdateFrequency) (
 		return nil, err
 	}
 
-	ws := websocket.New(url)
+	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		subMsg, err := newSubscribeMsg([]string{fmt.Sprintf("trades.%s.%s", instrument, freq)})
@@ -65,17 +65,20 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				subMsg, err := parseSubscriptionMsg(data)
+				subMsg, err := parseSubscriptionMsg(data.Data())
 				if err != nil {
 					s.errc <- err
+					data.Release()
 					return
 				}
 				if subMsg.Method != "" {
 					var msg []TradeMsg
 					if err := json.Unmarshal(subMsg.Params.Data, &msg); err != nil {
-						s.errc <- err
+						s.errc <- fmt.Errorf("deserializing Deribit trade message: %w (%s)", err, string(data.Data()))
+						data.Release()
 						return
 					}
+					data.Release()
 					s.msgs <- msg
 				}
 			case err := <-s.ws.Err():

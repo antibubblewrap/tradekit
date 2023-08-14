@@ -68,7 +68,7 @@ type subscriptionMsg struct {
 func parseSubscriptionMsg(b []byte) (subscriptionMsg, error) {
 	var m subscriptionMsg
 	if err := json.Unmarshal(b, &m); err != nil {
-		return m, fmt.Errorf("parsing subscriptionMsg: %w", err)
+		return m, fmt.Errorf("parsing Deribit subscriptionMsg: %w (%s)", err, string(b))
 	}
 	return m, nil
 }

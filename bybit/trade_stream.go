@@ -35,7 +35,7 @@ func NewTradeStream(market Market, symbol string) (*TradeStream, error) {
 		return nil, fmt.Errorf("creating Bybit TradeStream: %w", err)
 	}
 
-	ws := websocket.New(url)
+	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		channel := fmt.Sprintf("publicTrade.%s", symbol)
@@ -72,19 +72,23 @@ func (s *TradeStream) Start(ctx context.Context) error {
 			select {
 			case data := <-s.ws.Messages():
 				var msg TradeMsg
-				if err := json.Unmarshal(data, &msg); err != nil {
-					s.errc <- err
+				if err := json.Unmarshal(data.Data(), &msg); err != nil {
+					data.Release()
+					s.errc <- fmt.Errorf("deserializing Bybit trade message: %w (%s)", err, string(data.Data()))
 					return
 				}
 				if msg.Topic == "" {
-					if !isPingResponseMsg(data) {
+					if !isPingResponseMsg(data.Data()) {
 						// It should be the subscription response
-						if err := checkSubscribeResponse(data); err != nil {
+						if err := checkSubscribeResponse(data.Data()); err != nil {
+							data.Release()
 							s.errc <- err
 							return
 						}
 					}
+					data.Release()
 				} else {
+					data.Release()
 					s.msgs <- msg
 				}
 			case <-ticker.C:
