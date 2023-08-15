@@ -21,6 +21,26 @@ const (
 	Prod
 )
 
+type InstrumentKind string
+
+const (
+	FutureInstrument      InstrumentKind = "future"
+	OptionInstrument                     = "option"
+	SpotInstrument                       = "spot"
+	FutureComboInstrument                = "future_combo"
+	OptionComboInstrument                = "option_combo"
+	AnyInstrument                        = "any"
+)
+
+type Currency string
+
+const (
+	BtcCurrency  Currency = "BTC"
+	EthCurrency           = "ETH"
+	UsdcCurrency          = "USDC"
+	AnyCurrency           = "any"
+)
+
 func wsUrl(conn ConnectionType) (string, error) {
 	switch conn {
 	case ProdEventNode:

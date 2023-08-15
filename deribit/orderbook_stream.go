@@ -142,7 +142,7 @@ func (s *OrderbookStream) Messages() <-chan OrderbookMsg {
 	return s.msgs
 }
 
-// The error stream should be read concurrently with the  messages stream. If
+// The error stream should be read concurrently with the messages stream. If
 // this channel produces an error, the messages stream will be closed.
 func (s *OrderbookStream) Err() <-chan error {
 	return s.errc
