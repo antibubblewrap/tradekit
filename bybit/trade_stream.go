@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/antibubblewrap/tradekit/internal/websocket"
+	"github.com/valyala/fastjson"
 )
 
 type TradeMsgData struct {
@@ -27,6 +30,7 @@ type TradeStream struct {
 	ws   *websocket.Websocket
 	msgs chan TradeMsg
 	errc chan error
+	p    fastjson.Parser
 }
 
 func NewTradeStream(market Market, symbol string) (*TradeStream, error) {
@@ -56,6 +60,62 @@ func NewTradeStream(market Market, symbol string) (*TradeStream, error) {
 	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}, nil
 }
 
+func parseTradeMsgData(v *fastjson.Value) (TradeMsgData, error) {
+	amountS := string(v.GetStringBytes("v"))
+	amount, err := strconv.ParseFloat(amountS, 64)
+	if err != nil {
+		return TradeMsgData{}, fmt.Errorf("invalid trade amount %q", amountS)
+	}
+	priceS := string(v.GetStringBytes("p"))
+	price, err := strconv.ParseFloat(priceS, 64)
+	if err != nil {
+		return TradeMsgData{}, fmt.Errorf("invalid trade price %q", priceS)
+	}
+	return TradeMsgData{
+		FilledTimestamp: v.GetInt64("T"),
+		Symbol:          string(v.GetStringBytes("s")),
+		Side:            string(v.GetStringBytes("S")),
+		Price:           price,
+		Amount:          amount,
+	}, nil
+}
+
+// Parse a message received from the trade stream. If the message is a ping or
+// subscription response, then it will return an empty OrderbookMsg and a nil error.
+func (s *TradeStream) parseTradeMsg(msg websocket.Message) (TradeMsg, error) {
+	defer msg.Release()
+	v, err := s.p.ParseBytes(msg.Data())
+	if err != nil {
+		return TradeMsg{}, err
+	}
+	if isPingOrSubscribeMsg(v) {
+		return TradeMsg{}, nil
+	}
+
+	// It should be a trade message
+	topic := string(v.GetStringBytes("topic"))
+	if !strings.HasPrefix(topic, "publicTrade.") {
+		return TradeMsg{}, fmt.Errorf("invalid Bybit trade message: %s", string(msg.Data()))
+	}
+
+	items := v.GetArray("data")
+	trades := make([]TradeMsgData, len(items))
+	for i, v := range items {
+		trade, err := parseTradeMsgData(v)
+		if err != nil {
+			return TradeMsg{}, fmt.Errorf("invalid Bybit trade message: %w (%s)", err, string(msg.Data()))
+		}
+		trades[i] = trade
+	}
+
+	return TradeMsg{
+		Topic:     topic,
+		Timestamp: v.GetInt64("ts"),
+		Data:      trades,
+	}, nil
+
+}
+
 // Start the connection the the trade stream websocket. You must start a stream before
 // any messages can be received. It reconnects automatically on failure with exponential
 // backoff.
@@ -71,24 +131,12 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				var msg TradeMsg
-				if err := json.Unmarshal(data.Data(), &msg); err != nil {
-					data.Release()
-					s.errc <- fmt.Errorf("deserializing Bybit trade message: %w (%s)", err, string(data.Data()))
+				msg, err := s.parseTradeMsg(data)
+				if err != nil {
+					s.errc <- err
 					return
 				}
-				if msg.Topic == "" {
-					if !isPingResponseMsg(data.Data()) {
-						// It should be the subscription response
-						if err := checkSubscribeResponse(data.Data()); err != nil {
-							data.Release()
-							s.errc <- err
-							return
-						}
-					}
-					data.Release()
-				} else {
-					data.Release()
+				if msg.Topic != "" {
 					s.msgs <- msg
 				}
 			case <-ticker.C:
