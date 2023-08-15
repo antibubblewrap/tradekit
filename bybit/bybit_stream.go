@@ -2,7 +2,6 @@ package bybit
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 
 	"github.com/valyala/fastjson"
@@ -38,30 +37,6 @@ func channelUrl(market Market) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid Bybit market type")
 	}
-}
-
-type subscriptionResponse struct {
-	Success bool   `json:"success"`
-	RetMsg  string `json:"ret_msg"`
-	Op      string `json:"op"`
-}
-
-func isPingResponseMsg(data []byte) bool {
-	return fastjson.GetString(data, "op") == "ping"
-}
-
-func checkSubscribeResponse(data []byte) error {
-	var msg subscriptionResponse
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return err
-	}
-	if msg.Op != "subscribe" {
-		return fmt.Errorf("expected subscribe response but received: %s", string(data))
-	}
-	if !msg.Success {
-		return fmt.Errorf("subscription failed: %s", msg.RetMsg)
-	}
-	return nil
 }
 
 func heartbeatMsg() []byte {
