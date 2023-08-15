@@ -1,8 +1,10 @@
 package deribit
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/antibubblewrap/tradekit"
@@ -14,6 +16,7 @@ type OrderbookStream struct {
 	ws   *websocket.Websocket
 	msgs chan OrderbookMsg
 	errc chan error
+	p    fastjson.Parser
 }
 
 func NewOrderbookStream(t ConnectionType, instrument string, freq UpdateFrequency) (*OrderbookStream, error) {
@@ -42,9 +45,10 @@ func NewOrderbookStream(t ConnectionType, instrument string, freq UpdateFrequenc
 // OrderbookMsg is the message type streamed from the Deribit book channel.
 // For more info see: https://docs.deribit.com/#book-instrument_name-interval
 type OrderbookMsg struct {
+	// The type of orderbook update. Either "snapshot" or "change".
 	Type         string
 	Timestamp    int64
-	Instrument   string
+	Instrument   string `json:"instrument_name"`
 	ChangeID     int64
 	PrevChangeID int64
 	Bids         []tradekit.Level
@@ -55,7 +59,7 @@ func parseOrderbookLevel(v *fastjson.Value) tradekit.Level {
 	action := v.GetStringBytes("0")
 	price := v.GetFloat64("1")
 	amount := v.GetFloat64("2")
-	if string(action) == "delete" {
+	if bytes.Equal(action, []byte("delete")) {
 		amount = 0
 	}
 	return tradekit.Level{Price: price, Amount: amount}
@@ -69,30 +73,35 @@ func parseOrderbookLevels(items []*fastjson.Value) []tradekit.Level {
 	return levels
 }
 
-func parseOrderbookMsg(data []byte) (OrderbookMsg, error) {
-	var p fastjson.Parser
-	v, err := p.ParseBytes(data)
+// Parse an orderbook message received from the websocket stream. If the message is a
+// subscription response, it returns an empty OrderbookMsg and a nil error.
+func (s *OrderbookStream) parseOrderbookMsg(msg websocket.Message) (OrderbookMsg, error) {
+	defer msg.Release()
+	v, err := s.p.ParseBytes(msg.Data())
 	if err != nil {
-		return OrderbookMsg{}, err
+		return OrderbookMsg{}, fmt.Errorf("invalid Deribit orderbook message: %s", string(msg.Data()))
 	}
 
-	updateType := v.GetStringBytes("type")
-	timestamp := v.GetInt64("timestamp")
-	instrument := v.GetStringBytes("instrument_name")
-	changeId := v.GetInt64("change_id")
-	prevChangeId := v.GetInt64("prev_change_id")
+	method := v.GetStringBytes("method")
+	if len(method) == 0 {
+		return OrderbookMsg{}, nil
+	}
 
-	bids := parseOrderbookLevels(v.GetArray("bids"))
-	asks := parseOrderbookLevels(v.GetArray("asks"))
+	params := v.Get("params")
+	channel := string(params.GetStringBytes("channel"))
+	if !strings.HasPrefix(channel, "book.") {
+		return OrderbookMsg{}, fmt.Errorf("invalid Deribit orderbook message: %s", string(msg.Data()))
+	}
 
+	v = params.Get("data")
 	return OrderbookMsg{
-		Type:         string(updateType),
-		Timestamp:    timestamp,
-		Instrument:   string(instrument),
-		ChangeID:     changeId,
-		PrevChangeID: prevChangeId,
-		Bids:         bids,
-		Asks:         asks,
+		Type:         string(v.GetStringBytes("type")),
+		Timestamp:    v.GetInt64("timestamp"),
+		Instrument:   string(v.GetStringBytes("instrument_name")),
+		ChangeID:     v.GetInt64("change_id"),
+		PrevChangeID: v.GetInt64("prev_change_id"),
+		Bids:         parseOrderbookLevels(v.GetArray("bids")),
+		Asks:         parseOrderbookLevels(v.GetArray("asks")),
 	}, nil
 }
 
@@ -109,20 +118,12 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				subMsg, err := parseSubscriptionMsg(data.Data())
+				msg, err := s.parseOrderbookMsg(data)
 				if err != nil {
 					s.errc <- err
-					data.Release()
 					return
 				}
-				if subMsg.Method != "" {
-					msg, err := parseOrderbookMsg(subMsg.Params.Data)
-					if err != nil {
-						s.errc <- fmt.Errorf("deserializing Deribit order book message: %w (%s)", err, string(data.Data()))
-						data.Release()
-						return
-					}
-					data.Release()
+				if msg.Type != "" {
 					s.msgs <- msg
 				}
 			case err := <-s.ws.Err():

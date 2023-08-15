@@ -2,17 +2,19 @@ package deribit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/antibubblewrap/tradekit/internal/websocket"
+	"github.com/valyala/fastjson"
 )
 
 type TradeStream struct {
 	ws   *websocket.Websocket
 	msgs chan []TradeMsg
 	errc chan error
+	p    fastjson.Parser
 }
 
 // TradeMsg is the message type streamed from the Deribit trade channel.
@@ -52,6 +54,48 @@ func NewTradeStream(t ConnectionType, instrument string, freq UpdateFrequency) (
 	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}, nil
 }
 
+func parseTrade(v *fastjson.Value) TradeMsg {
+	return TradeMsg{
+		Instrument:    string(v.GetStringBytes("instrument_name")),
+		TradeSeq:      v.GetInt64("trade_seq"),
+		Timestamp:     v.GetInt64("timestamp"),
+		TickDirection: v.GetInt64("tick_direction"),
+		Price:         v.GetFloat64("price"),
+		Amount:        v.GetFloat64("amount"),
+		Direction:     string(v.GetStringBytes("direction")),
+		IndexPrice:    v.GetFloat64("index_price"),
+		MarkPrice:     v.GetFloat64("mark_price"),
+	}
+}
+
+// Parse an trade message received from the websocket stream. If the message is a
+// subscription response, it returns an nil slice of TradeMsg and a nil error.
+func (s *TradeStream) parseTradeMsg(msg websocket.Message) ([]TradeMsg, error) {
+	defer msg.Release()
+	v, err := s.p.ParseBytes(msg.Data())
+	if err != nil {
+		return nil, fmt.Errorf("invalid Deribit trade message: %s", string(msg.Data()))
+	}
+
+	method := v.GetStringBytes("method")
+	if len(method) == 0 {
+		return nil, nil
+	}
+
+	params := v.Get("params")
+	channel := string(params.GetStringBytes("channel"))
+	if !strings.HasPrefix(channel, "trades.") {
+		return nil, fmt.Errorf("invalid Deribit trade message: %s", string(msg.Data()))
+	}
+
+	items := params.GetArray("data")
+	trades := make([]TradeMsg, len(items))
+	for i, v := range items {
+		trades[i] = parseTrade(v)
+	}
+	return trades, nil
+}
+
 // Start the connection the the Deribit trade stream websocket. You must start a
 // stream before any messages can be received. The connection will be automatically
 // retried on failure with exponential backoff.
@@ -65,20 +109,12 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				subMsg, err := parseSubscriptionMsg(data.Data())
+				msg, err := s.parseTradeMsg(data)
 				if err != nil {
 					s.errc <- err
-					data.Release()
 					return
 				}
-				if subMsg.Method != "" {
-					var msg []TradeMsg
-					if err := json.Unmarshal(subMsg.Params.Data, &msg); err != nil {
-						s.errc <- fmt.Errorf("deserializing Deribit trade message: %w (%s)", err, string(data.Data()))
-						data.Release()
-						return
-					}
-					data.Release()
+				if msg != nil {
 					s.msgs <- msg
 				}
 			case err := <-s.ws.Err():

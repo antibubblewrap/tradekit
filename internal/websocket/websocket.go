@@ -60,7 +60,9 @@ func (m Message) Data() []byte {
 	return m.buf.Bytes()
 }
 
-// Release *must* be called once you are finished with a message.
+// Release the message back to the WebSocket's buffer pool. You should call this method
+// after you are finished reading the message's data. Once called, the message's data
+// is no longer valid, and should not be used.
 func (m Message) Release() {
 	m.pool.put(m.buf)
 }
