@@ -1,5 +1,7 @@
 # Crypto TradeKit
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/antibubblewrap/tradekit.svg)](https://pkg.go.dev/github.com/antibubblewrap/tradekit)
+
 A collection of utiltities for cryptocurrency trading with Go. This package is a work
 in progress.
 
