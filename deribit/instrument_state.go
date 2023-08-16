@@ -27,9 +27,18 @@ type InstrumentState struct {
 	Instrument string `json:"instrument_name"`
 }
 
+type InstrumentStateSub struct {
+	Kind     InstrumentKind
+	Currency Currency
+}
+
+func (sub InstrumentStateSub) channel() string {
+	return fmt.Sprintf("instrument.state.%s.%s", sub.Kind, sub.Currency)
+}
+
 // NewInstrumentStateStream creates a new InstrumentStateStream to the channel specified
 // by the given InstrumentKind and Currency.
-func NewInstrumentStateStream(t ConnectionType, kind InstrumentKind, currency Currency) (*InstrumentStateStream, error) {
+func NewInstrumentStateStream(t ConnectionType, subs ...InstrumentStateSub) (*InstrumentStateStream, error) {
 	url, err := wsUrl(t)
 	if err != nil {
 		return nil, err
@@ -38,7 +47,12 @@ func NewInstrumentStateStream(t ConnectionType, kind InstrumentKind, currency Cu
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
-		subMsg, err := newSubscribeMsg([]string{fmt.Sprintf("instrument.state.%s.%s", kind, currency)})
+		id := genId()
+		channels := make([]string, len(subs))
+		for i, sub := range subs {
+			channels[i] = sub.channel()
+		}
+		subMsg, err := newSubscribeMsg(id, channels)
 		if err != nil {
 			return err
 		}

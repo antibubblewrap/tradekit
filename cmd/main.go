@@ -37,7 +37,8 @@ func startBybitTradeStream(ctx context.Context, market bybit.Market, symbol stri
 }
 
 func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribit.OrderbookStream {
-	stream, err := deribit.NewOrderbookStream(deribit.ProdEventNode, instrument, deribit.UpdateRaw)
+	sub := deribit.OrderbookSub{Instrument: instrument, Freq: deribit.UpdateRaw}
+	stream, err := deribit.NewOrderbookStream(deribit.ProdEventNode, sub)
 	if err != nil {
 		panic(err)
 	}
@@ -49,7 +50,8 @@ func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribi
 }
 
 func startDeribitTradeStream(ctx context.Context, instrument string) *deribit.TradeStream {
-	stream, err := deribit.NewTradeStream(deribit.ProdEventNode, instrument, deribit.UpdateRaw)
+	sub := deribit.TradeSub{Instrument: instrument, Freq: deribit.UpdateRaw}
+	stream, err := deribit.NewTradeStream(deribit.ProdEventNode, sub)
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +115,6 @@ func main() {
 			deribitMidPriceEWMA.Update(deribitBook.MidPrice(), msg.Timestamp)
 		case _ = <-deribitTradeStream.Messages():
 			// Do something with the trade message
-			continue
 		case <-ticker.C:
 			fmt.Printf("Deribit midprice 1 min EWMA = %.2f\n", deribitMidPriceEWMA.Value)
 			fmt.Printf("Bybit 1 min rolling volume = %.2f\n", bybit1mVolume.Value())

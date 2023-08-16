@@ -11,10 +11,14 @@ import (
 )
 
 type TradeStream struct {
-	ws   *websocket.Websocket
-	msgs chan []TradeMsg
-	errc chan error
-	p    fastjson.Parser
+	ws              *websocket.Websocket
+	msgs            chan []TradeMsg
+	errc            chan error
+	p               fastjson.Parser
+	initSubs        []string
+	subs            map[TradeSub]struct{}
+	subRequestIds   map[int64]struct{}
+	unsubRequestIds map[int64]struct{}
 }
 
 // TradeMsg is the message type streamed from the Deribit trade channel.
@@ -31,27 +35,106 @@ type TradeMsg struct {
 	MarkPrice     float64 `json:"mark_price"`
 }
 
-func NewTradeStream(t ConnectionType, instrument string, freq UpdateFrequency) (*TradeStream, error) {
+type TradeSub struct {
+	Instrument string
+	Freq       UpdateFrequency
+}
+
+func (sub TradeSub) channel() string {
+	return fmt.Sprintf("trades.%s.%s", sub.Instrument, sub.Freq)
+}
+
+func NewTradeStream(t ConnectionType, subs ...TradeSub) (*TradeStream, error) {
 	url, err := wsUrl(t)
 	if err != nil {
 		return nil, err
 	}
-
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
-	ws.OnConnect = func() error {
-		subMsg, err := newSubscribeMsg([]string{fmt.Sprintf("trades.%s.%s", instrument, freq)})
-		if err != nil {
-			return err
-		}
-		ws.Send(subMsg)
-		return nil
-	}
 
 	msgs := make(chan []TradeMsg)
 	errc := make(chan error)
 
-	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}, nil
+	initSubs := make([]string, len(subs))
+	for i, sub := range subs {
+		initSubs[i] = sub.channel()
+	}
+
+	return &TradeStream{
+		ws:              &ws,
+		msgs:            msgs,
+		errc:            errc,
+		initSubs:        initSubs,
+		subs:            make(map[TradeSub]struct{}),
+		subRequestIds:   make(map[int64]struct{}),
+		unsubRequestIds: make(map[int64]struct{}),
+	}, nil
+}
+
+func (s *TradeStream) subscriptions() map[TradeSub]struct{} {
+	return s.subs
+}
+
+func (s *TradeStream) subscribeRequestIds() map[int64]struct{} {
+	return s.subRequestIds
+}
+
+func (s *TradeStream) unsubscribRequestIds() map[int64]struct{} {
+	return s.unsubRequestIds
+}
+
+func (s *TradeStream) parseChannel(channel string) (TradeSub, error) {
+	sp := strings.Split(channel, ".")
+	if len(sp) != 3 {
+		return TradeSub{}, fmt.Errorf("invalid trade channel %q", channel)
+	}
+	if sp[0] != "trades" {
+		return TradeSub{}, fmt.Errorf("invalid trade channel %q", channel)
+	}
+	instrument := sp[1]
+	freq, err := updateFreqFromString(sp[2])
+	if err != nil {
+		return TradeSub{}, fmt.Errorf("invalid trade channel %q: %w", channel, err)
+	}
+	return TradeSub{instrument, freq}, nil
+}
+
+func (s *TradeStream) parseMessage(v *fastjson.Value) ([]TradeMsg, error) {
+	items, err := v.Array()
+	if err != nil {
+		return nil, err
+	}
+	trades := make([]TradeMsg, len(items))
+	for i, v := range items {
+		trades[i] = parseTrade(v)
+	}
+	return trades, nil
+}
+
+// onConnect makes the channel subscriptions after the websocket connection is made,
+// either on the initial connection, or after any re-connections.
+func (s *TradeStream) onConnect() error {
+	// If it's the first connection, then subscribe to the set of channels specified when
+	// the stream was created, otherwise re-subscribe to the set of existing channels.
+	var channels []string
+	if len(s.initSubs) > 0 {
+		channels = s.initSubs
+	} else {
+		channels = make([]string, 0, len(s.subs))
+		for sub := range s.subs {
+			channels = append(channels, sub.channel())
+		}
+	}
+	fmt.Printf("channels = %+v\n", channels)
+	id := genId()
+	subMsg, err := newSubscribeMsg(id, channels)
+	if err != nil {
+		return err
+	}
+	s.ws.Send(subMsg)
+	s.subRequestIds[id] = struct{}{}
+	s.initSubs = nil
+	return nil
 }
 
 func parseTrade(v *fastjson.Value) TradeMsg {
@@ -68,38 +151,56 @@ func parseTrade(v *fastjson.Value) TradeMsg {
 	}
 }
 
-// Parse an trade message received from the websocket stream. If the message is a
-// subscription response, it returns an nil slice of TradeMsg and a nil error.
-func (s *TradeStream) parseTradeMsg(msg websocket.Message) ([]TradeMsg, error) {
-	defer msg.Release()
-	v, err := s.p.ParseBytes(msg.Data())
-	if err != nil {
-		return nil, fmt.Errorf("invalid Deribit trade message: %s", string(msg.Data()))
+// Subscribe adds 1 or more trade subscriptions to the current stream.
+func (s *TradeStream) Subscribe(subs ...TradeSub) error {
+	// Note: we send the subscribe request here, but wait until the response is
+	// received in parseOrderBookMsg below to update the set of active subscriptions.
+	newChannels := make([]string, 0)
+	for _, sub := range subs {
+		if _, ok := s.subs[sub]; !ok {
+			newChannels = append(newChannels, sub.channel())
+		}
 	}
+	if len(newChannels) > 0 {
+		id := genId()
+		subMsg, err := newSubscribeMsg(id, newChannels)
+		if err != nil {
+			return err
+		}
+		s.ws.Send(subMsg)
+		s.subRequestIds[id] = struct{}{}
+	}
+	return nil
+}
 
-	method := v.GetStringBytes("method")
-	if len(method) == 0 {
-		return nil, nil
+// Unsubscribe removes 1 or more trade subscriptions from the current stream.
+func (s *TradeStream) Unsubscribe(subs ...TradeSub) error {
+	// Note: we send the unsubscribe request here, but wait until the response is
+	// received in parseOrderBookMsg below to update the set of active subscriptions.
+	removeChannels := make([]string, 0)
+	for _, sub := range subs {
+		if _, ok := s.subs[sub]; ok {
+			removeChannels = append(removeChannels, sub.channel())
+		}
 	}
-
-	params := v.Get("params")
-	channel := string(params.GetStringBytes("channel"))
-	if !strings.HasPrefix(channel, "trades.") {
-		return nil, fmt.Errorf("invalid Deribit trade message: %s", string(msg.Data()))
+	if len(removeChannels) > 0 {
+		id := genId()
+		unsubMsg, err := newUnsubscribeMsg(id, removeChannels)
+		s.unsubRequestIds[id] = struct{}{}
+		if err != nil {
+			return err
+		}
+		s.ws.Send(unsubMsg)
+		s.unsubRequestIds[id] = struct{}{}
 	}
-
-	items := params.GetArray("data")
-	trades := make([]TradeMsg, len(items))
-	for i, v := range items {
-		trades[i] = parseTrade(v)
-	}
-	return trades, nil
+	return nil
 }
 
 // Start the connection the the Deribit trade stream websocket. You must start a
 // stream before any messages can be received. The connection will be automatically
 // retried on failure with exponential backoff.
 func (s *TradeStream) Start(ctx context.Context) error {
+	s.ws.OnConnect = s.onConnect
 	if err := s.ws.Start(ctx); err != nil {
 		return fmt.Errorf("connecting to Deribit TradeStream websocket: %w", err)
 	}
@@ -109,9 +210,10 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				msg, err := s.parseTradeMsg(data)
+				fmt.Println(string(data.Data()))
+				msg, err := parseStreamMsg[TradeSub, []TradeMsg](s, data, s.p)
 				if err != nil {
-					s.errc <- err
+					s.errc <- fmt.Errorf("invalid Deribit trade message: %w", err)
 					return
 				}
 				if msg != nil {
