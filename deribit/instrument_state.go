@@ -29,7 +29,7 @@ type InstrumentState struct {
 
 type InstrumentStateSub struct {
 	Kind     InstrumentKind
-	Currency Currency
+	Currency string
 }
 
 func (sub InstrumentStateSub) channel() string {

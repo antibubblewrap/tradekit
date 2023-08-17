@@ -125,7 +125,6 @@ func (s *TradeStream) onConnect() error {
 			channels = append(channels, sub.channel())
 		}
 	}
-	fmt.Printf("channels = %+v\n", channels)
 	id := genId()
 	subMsg, err := newSubscribeMsg(id, channels)
 	if err != nil {
@@ -210,7 +209,6 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				fmt.Println(string(data.Data()))
 				msg, err := parseStreamMsg[TradeSub, []TradeMsg](s, data, s.p)
 				if err != nil {
 					s.errc <- fmt.Errorf("invalid Deribit trade message: %w", err)

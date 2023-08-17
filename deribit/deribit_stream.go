@@ -16,6 +16,9 @@ const (
 	testEventNodeUrl        = "wss://test.deribit.com/den/ws"
 	prodWsUrl               = "wss://www.deribit.com/ws/api/v2"
 	testWsUrl               = "wss://test.deribit.com/ws/api/v2"
+
+	prodApiUrl = "https://www.deribit.com/api/v2"
+	testApiUrl = "https://test.deribit.com/api/v2"
 )
 
 const (
@@ -34,15 +37,6 @@ const (
 	FutureComboInstrument                = "future_combo"
 	OptionComboInstrument                = "option_combo"
 	AnyInstrument                        = "any"
-)
-
-type Currency string
-
-const (
-	BtcCurrency  Currency = "BTC"
-	EthCurrency           = "ETH"
-	UsdcCurrency          = "USDC"
-	AnyCurrency           = "any"
 )
 
 func wsUrl(conn ConnectionType) (string, error) {
