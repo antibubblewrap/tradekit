@@ -39,13 +39,19 @@ func (sub OrderbookDepthSub) channel() string {
 
 // NewOrderbookDepthStream creates a new stream for reading from the Deribit book depth
 // updates stream. You must call Start on the stream to receive messages.
-func NewOrderbookDepthStream(t ConnectionType, subs ...OrderbookDepthSub) (*OrderbookDepthStream, error) {
+func NewOrderbookDepthStream(t ConnectionType, opts *tradekit.StreamOptions, subs ...OrderbookDepthSub) (*OrderbookDepthStream, error) {
 	url, err := wsUrl(t)
 	if err != nil {
 		return nil, err
 	}
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
+
+	if opts != nil {
+		if opts.ResetInterval != 0 {
+			ws.ResetInterval = opts.ResetInterval
+		}
+	}
 
 	subscriptions := make(map[subscription]struct{})
 	for _, sub := range subs {
@@ -217,4 +223,10 @@ func (s *OrderbookDepthStream) Messages() <-chan OrderbookDepthMsg {
 // this channel produces an error, the messages stream will be closed.
 func (s *OrderbookDepthStream) Err() <-chan error {
 	return s.errc
+}
+
+// Close the underlying websocket connection to Deribit. The Messages stream will be
+// closed immediately.
+func (s *OrderbookDepthStream) Close() {
+	s.ws.Close()
 }

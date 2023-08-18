@@ -38,7 +38,7 @@ func startBybitTradeStream(ctx context.Context, market bybit.Market, symbol stri
 
 func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribit.OrderbookStream {
 	sub := deribit.OrderbookSub{Instrument: instrument, Freq: deribit.UpdateRaw}
-	stream, err := deribit.NewOrderbookStream(deribit.ProdEventNode, sub)
+	stream, err := deribit.NewOrderbookStream(deribit.ProdEventNode, nil, sub)
 	if err != nil {
 		panic(err)
 	}
@@ -51,7 +51,7 @@ func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribi
 
 func startDeribitTradeStream(ctx context.Context, instrument string) *deribit.TradeStream {
 	sub := deribit.TradeSub{Instrument: instrument, Freq: deribit.UpdateRaw}
-	stream, err := deribit.NewTradeStream(deribit.ProdEventNode, sub)
+	stream, err := deribit.NewTradeStream(deribit.ProdEventNode, nil, sub)
 	if err != nil {
 		panic(err)
 	}

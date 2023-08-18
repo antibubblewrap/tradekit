@@ -128,10 +128,7 @@ func (ws *Websocket) connect(ctx context.Context) error {
 		return err
 	}
 	ws.conn = conn
-	if err := ws.OnConnect(); err != nil {
-		return err
-	}
-	return nil
+	return ws.OnConnect()
 }
 
 // Start the websocket connection. This function creates the websocket connection and
@@ -143,27 +140,59 @@ func (ws *Websocket) Start(ctx context.Context) error {
 		return err
 	}
 
-	isConnecting := false
+	closeGoingAway, err := websocket.NewPreparedMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
+	if err != nil {
+		return err
+	}
+
+	reconnecting := false
+	var reconnectLock sync.Mutex
+
+	reconnect := func(sendClose bool) error {
+		defer func() {
+			reconnecting = false
+			reconnectLock.Unlock()
+		}()
+		reconnecting = true
+		reconnectLock.Lock()
+		if sendClose {
+			if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
+				return err
+			}
+		}
+		if err := ws.connect(ctx); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Reconnect on any of these close codes
+	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater}
+
 	ws.wg.Add(1)
 	go func() {
-		defer ws.wg.Done()
-		defer close(ws.responses)
+		defer func() {
+			ws.closed = true
+			close(ws.responses)
+			ws.wg.Done()
+		}()
 		for {
+			if reconnecting {
+				// Wait until the new connection is established
+				reconnectLock.Lock()
+				reconnectLock.Unlock()
+			}
+			if ws.closed {
+				return
+			}
 			_, r, err := ws.conn.NextReader()
 			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-					ws.closed = true
-					return
-				} else if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
-					isConnecting = true
-					if err := ws.connect(ctx); err != nil {
-						ws.closed = true
+				if websocket.IsCloseError(err, reconnectOn...) {
+					if err := reconnect(false); err != nil {
 						ws.errc <- err
 						return
 					}
-					isConnecting = false
 				} else {
-					ws.closed = true
 					ws.errc <- err
 					return
 				}
@@ -180,39 +209,44 @@ func (ws *Websocket) Start(ctx context.Context) error {
 		}
 	}()
 
-	closeNormalMsg, err := websocket.NewPreparedMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	if err != nil {
-		return err
-	}
-	closeGoingAwayMsg, err := websocket.NewPreparedMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
-	if err != nil {
-		return err
-	}
-
 	resetTicker := time.NewTicker(ws.ResetInterval)
 	pingTicker := time.NewTicker(ws.PingInterval)
 
 	ws.wg.Add(1)
 	go func() {
-		defer ws.wg.Done()
+		defer func() {
+			ws.closed = true
+			ws.wg.Done()
+		}()
 		for {
 			select {
 			case <-ctx.Done():
-				ws.conn.WritePreparedMessage(closeNormalMsg)
+				if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
+					ws.errc <- err
+				}
 				return
 			case <-resetTicker.C:
-				if !isConnecting {
-					ws.conn.WritePreparedMessage(closeGoingAwayMsg)
+				if err := reconnect(true); err != nil {
+					ws.errc <- err
+					return
 				}
 			case <-pingTicker.C:
-				if !isConnecting {
-					ws.conn.WriteMessage(websocket.PingMessage, nil)
+				if !reconnecting {
+					if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+						ws.errc <- err
+						return
+					}
 				}
 			case <-ws.close:
-				ws.conn.WritePreparedMessage(closeNormalMsg)
+				if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
+					ws.errc <- err
+				}
 				return
 			case msg := <-ws.requests:
-				ws.conn.WriteMessage(websocket.TextMessage, msg)
+				if err := ws.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					ws.errc <- err
+					return
+				}
 			}
 		}
 	}()
@@ -232,13 +266,12 @@ func (ws *Websocket) Messages() <-chan Message {
 	return ws.responses
 }
 
-// Close sends a closes the websocket connection. The Messages channel is closed once
-// the close frame has been acknowledged by the server.
+// Close sends a closes the websocket connection. The Messages channel will be closed
+// immediately after.
 func (ws *Websocket) Close() {
 	if ws.closed {
 		return
 	}
-	ws.closed = true
 	ws.close <- struct{}{}
 }
 

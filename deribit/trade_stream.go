@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/antibubblewrap/tradekit"
 	"github.com/antibubblewrap/tradekit/internal/websocket"
 	"github.com/valyala/fastjson"
 )
@@ -43,13 +44,19 @@ func (sub TradeSub) channel() string {
 	return fmt.Sprintf("trades.%s.%s", sub.Instrument, sub.Freq)
 }
 
-func NewTradeStream(t ConnectionType, subs ...TradeSub) (*TradeStream, error) {
+func NewTradeStream(t ConnectionType, opts *tradekit.StreamOptions, subs ...TradeSub) (*TradeStream, error) {
 	url, err := wsUrl(t)
 	if err != nil {
 		return nil, err
 	}
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
+
+	if opts != nil {
+		if opts.ResetInterval != 0 {
+			ws.ResetInterval = opts.ResetInterval
+		}
+	}
 
 	msgs := make(chan []TradeMsg)
 	errc := make(chan error)

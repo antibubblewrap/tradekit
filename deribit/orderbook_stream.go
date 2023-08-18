@@ -31,13 +31,19 @@ func (sub OrderbookSub) channel() string {
 	return fmt.Sprintf("book.%s.%s", sub.Instrument, sub.Freq)
 }
 
-func NewOrderbookStream(t ConnectionType, subs ...OrderbookSub) (*OrderbookStream, error) {
+func NewOrderbookStream(t ConnectionType, opts *tradekit.StreamOptions, subs ...OrderbookSub) (*OrderbookStream, error) {
 	url, err := wsUrl(t)
 	if err != nil {
 		return nil, err
 	}
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
+
+	if opts != nil {
+		if opts.ResetInterval != 0 {
+			ws.ResetInterval = opts.ResetInterval
+		}
+	}
 
 	subscriptions := make(map[subscription]struct{})
 	for _, sub := range subs {
