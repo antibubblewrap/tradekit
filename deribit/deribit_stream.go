@@ -16,9 +16,6 @@ const (
 	testEventNodeUrl        = "wss://test.deribit.com/den/ws"
 	prodWsUrl               = "wss://www.deribit.com/ws/api/v2"
 	testWsUrl               = "wss://test.deribit.com/ws/api/v2"
-
-	prodApiUrl = "https://www.deribit.com/api/v2"
-	testApiUrl = "https://test.deribit.com/api/v2"
 )
 
 const (
@@ -98,37 +95,24 @@ func updateFreqFromString(s string) (UpdateFrequency, error) {
 	}
 }
 
-type subscriptionParams struct {
-	Channel string
-	Data    json.RawMessage
-}
-
-type subscriptionMsg struct {
-	Method string
-	Params subscriptionParams
-}
-
-func parseSubscriptionMsg(b []byte) (subscriptionMsg, error) {
-	var m subscriptionMsg
-	if err := json.Unmarshal(b, &m); err != nil {
-		return m, fmt.Errorf("parsing Deribit subscriptionMsg: %w (%s)", err, string(b))
-	}
-	return m, nil
-}
-
 func genId() int64 {
 	return time.Now().UnixNano()
 }
 
-type stream[T comparable, U any] interface {
-	subscriptions() map[T]struct{}
-	subscribeRequestIds() map[int64]struct{}
-	unsubscribRequestIds() map[int64]struct{}
-	parseChannel(string) (T, error)
-	parseMessage(*fastjson.Value) (U, error)
+type subscription interface {
+	channel() string
 }
 
-func parseStreamMsg[T comparable, U any](s stream[T, U], msg websocket.Message, p fastjson.Parser) (U, error) {
+type stream[U any] interface {
+	subscriptions() map[subscription]struct{}
+	subscribeRequestIds() map[int64]struct{}
+	unsubscribRequestIds() map[int64]struct{}
+	parseChannel(string) (subscription, error)
+	parseMessage(*fastjson.Value) (U, error)
+	websocket() *websocket.Websocket
+}
+
+func parseStreamMsg[U any](s stream[U], msg websocket.Message, p fastjson.Parser) (U, error) {
 	defer msg.Release()
 
 	v, err := p.ParseBytes(msg.Data())
@@ -145,7 +129,7 @@ func parseStreamMsg[T comparable, U any](s stream[T, U], msg websocket.Message, 
 		var empty U
 		id := v.GetInt64("id")
 		channels := v.GetArray("result")
-		subUpdates := make([]T, len(channels))
+		subUpdates := make([]subscription, len(channels))
 		for i, c := range channels {
 			channel, err := c.StringBytes()
 			if err != nil {
@@ -189,4 +173,28 @@ func parseStreamMsg[T comparable, U any](s stream[T, U], msg websocket.Message, 
 		return empty, fmt.Errorf(`field "params.data" is missing: %s`, string(msg.Data()))
 	}
 	return s.parseMessage(data)
+}
+
+// subscribeAll sends a subscription request to the stream's websocket for all of its
+// subscriptions.
+func subscribeAll[U any](s stream[U]) error {
+	// If there are many channels, a subscribe message containing all of them may be so
+	// large that the server will close the connection with a "message too big" error. To
+	// prevent this, we'll split the channels into chunks and send multiple subscribe
+	// messages
+	channels := make([]string, 0, len(s.subscriptions()))
+	for sub := range s.subscriptions() {
+		channels = append(channels, sub.channel())
+	}
+	for _, c := range chunk[string](channels, 100) {
+		id := genId()
+		subMsg, err := newSubscribeMsg(id, c)
+		if err != nil {
+			return err
+		}
+		s.websocket().Send(subMsg)
+		s.subscribeRequestIds()[id] = struct{}{}
+	}
+
+	return nil
 }

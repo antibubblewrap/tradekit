@@ -15,14 +15,13 @@ import (
 // OrderbookDepth stream streams orderbook depth updates from the Deribit book.{instrument_name}.{group}.{depth}.{interval}
 // channel. For streaming incremental order book updates, use OrderbookStream.
 type OrderbookDepthStream struct {
-	ws                *websocket.Websocket
-	msgs              chan OrderbookDepthMsg
-	errc              chan error
-	p                 fastjson.Parser
-	initSubscriptions []string
-	subs              map[OrderbookDepthSub]struct{}
-	subRequestIds     map[int64]struct{}
-	unsubRequestIds   map[int64]struct{}
+	ws              *websocket.Websocket
+	msgs            chan OrderbookDepthMsg
+	errc            chan error
+	p               fastjson.Parser
+	subs            map[subscription]struct{}
+	subRequestIds   map[int64]struct{}
+	unsubRequestIds map[int64]struct{}
 }
 
 // OrderbookDepthSub represents a subscription to a deribit orderbook depth stream.
@@ -34,7 +33,7 @@ type OrderbookDepthSub struct {
 	Depth int
 }
 
-func (sub *OrderbookDepthSub) channel() string {
+func (sub OrderbookDepthSub) channel() string {
 	return fmt.Sprintf("book.%s.none.%d.100ms", sub.Instrument, sub.Depth)
 }
 
@@ -48,23 +47,25 @@ func NewOrderbookDepthStream(t ConnectionType, subs ...OrderbookDepthSub) (*Orde
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 
-	initSubs := make([]string, len(subs))
-	for i, sub := range subs {
-		initSubs[i] = sub.channel()
+	subscriptions := make(map[subscription]struct{})
+	for _, sub := range subs {
+		subscriptions[sub] = struct{}{}
 	}
 
-	return &OrderbookDepthStream{
-		ws:                &ws,
-		msgs:              make(chan OrderbookDepthMsg),
-		errc:              make(chan error),
-		initSubscriptions: initSubs,
-		subs:              make(map[OrderbookDepthSub]struct{}),
-		subRequestIds:     make(map[int64]struct{}),
-		unsubRequestIds:   make(map[int64]struct{}),
-	}, nil
+	stream := &OrderbookDepthStream{
+		ws:              &ws,
+		msgs:            make(chan OrderbookDepthMsg),
+		errc:            make(chan error),
+		subs:            subscriptions,
+		subRequestIds:   make(map[int64]struct{}),
+		unsubRequestIds: make(map[int64]struct{}),
+	}
+	stream.ws.OnConnect = func() error { return subscribeAll[OrderbookDepthMsg](stream) }
+
+	return stream, nil
 }
 
-func (s *OrderbookDepthStream) subscriptions() map[OrderbookDepthSub]struct{} {
+func (s *OrderbookDepthStream) subscriptions() map[subscription]struct{} {
 	return s.subs
 }
 
@@ -76,7 +77,7 @@ func (s *OrderbookDepthStream) unsubscribRequestIds() map[int64]struct{} {
 	return s.unsubRequestIds
 }
 
-func (s *OrderbookDepthStream) parseChannel(channel string) (OrderbookDepthSub, error) {
+func (s *OrderbookDepthStream) parseChannel(channel string) (subscription, error) {
 	sp := strings.Split(channel, ".")
 	if len(sp) != 5 {
 		return OrderbookDepthSub{}, fmt.Errorf("invalid book depth channel %q", channel)
@@ -90,6 +91,10 @@ func (s *OrderbookDepthStream) parseChannel(channel string) (OrderbookDepthSub, 
 		return OrderbookDepthSub{}, fmt.Errorf("invalid book depth channel: invalid depth %s", sp[3])
 	}
 	return OrderbookDepthSub{instrument, int(depth)}, nil
+}
+
+func (s *OrderbookDepthStream) websocket() *websocket.Websocket {
+	return s.ws
 }
 
 // OrderbookDepthMsg is the message type streamed from the Deribit book depth channel.
@@ -124,31 +129,6 @@ func (s *OrderbookDepthStream) parseMessage(v *fastjson.Value) (OrderbookDepthMs
 		Bids:       parsePriceLevels(v.GetArray("bids")),
 		Asks:       parsePriceLevels(v.GetArray("asks")),
 	}, nil
-}
-
-// onConnect makes the channel subscriptions after the websocket connection is made,
-// either on the initial connection, or after any re-connections.
-func (s *OrderbookDepthStream) onConnect() error {
-	// If it's the first connection, then subscribe to the set of channels specified when
-	// the stream was created, otherwise re-subscribe to the set of existing channels.
-	var channels []string
-	if len(s.initSubscriptions) > 0 {
-		channels = s.initSubscriptions
-	} else {
-		channels = make([]string, 0, len(s.subs))
-		for sub := range s.subs {
-			channels = append(channels, sub.channel())
-		}
-	}
-	id := genId()
-	subMsg, err := newSubscribeMsg(id, channels)
-	if err != nil {
-		return err
-	}
-	s.ws.Send(subMsg)
-	s.subRequestIds[id] = struct{}{}
-	s.initSubscriptions = nil
-	return nil
 }
 
 // Subscribe adds 1 or more additional subscriptions to the stream.
@@ -200,7 +180,6 @@ func (s *OrderbookDepthStream) Unsubscribe(subs ...OrderbookDepthSub) error {
 // stream before any messages can be received. The connection will be automatically
 // retried on failure with exponential backoff.
 func (s *OrderbookDepthStream) Start(ctx context.Context) error {
-	s.ws.OnConnect = s.onConnect
 	if err := s.ws.Start(ctx); err != nil {
 		return fmt.Errorf("connecting to Deribit OrderbookDepthStream websocket: %w", err)
 	}
@@ -210,7 +189,7 @@ func (s *OrderbookDepthStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				msg, err := parseStreamMsg[OrderbookDepthSub, OrderbookDepthMsg](s, data, s.p)
+				msg, err := parseStreamMsg[OrderbookDepthMsg](s, data, s.p)
 				if err != nil {
 					s.errc <- fmt.Errorf("invalid Deribit book depth message: %w", err)
 					return

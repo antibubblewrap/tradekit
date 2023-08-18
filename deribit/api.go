@@ -9,6 +9,9 @@ import (
 )
 
 const (
+	prodApiUrl = "https://www.deribit.com/api/v2"
+	testApiUrl = "https://test.deribit.com/api/v2"
+
 	endpointGetInstruments string = "/public/get_instruments"
 	endpointGetCurrencies         = "/public/get_currencies"
 )

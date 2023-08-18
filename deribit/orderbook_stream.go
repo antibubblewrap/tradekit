@@ -13,14 +13,13 @@ import (
 )
 
 type OrderbookStream struct {
-	ws                *websocket.Websocket
-	msgs              chan OrderbookMsg
-	errc              chan error
-	p                 fastjson.Parser
-	initSubscriptions []string
-	subs              map[OrderbookSub]struct{}
-	subRequestIds     map[int64]struct{}
-	unsubRequestIds   map[int64]struct{}
+	ws              *websocket.Websocket
+	msgs            chan OrderbookMsg
+	errc            chan error
+	p               fastjson.Parser
+	subs            map[subscription]struct{}
+	subRequestIds   map[int64]struct{}
+	unsubRequestIds map[int64]struct{}
 }
 
 type OrderbookSub struct {
@@ -28,7 +27,7 @@ type OrderbookSub struct {
 	Freq       UpdateFrequency
 }
 
-func (sub *OrderbookSub) channel() string {
+func (sub OrderbookSub) channel() string {
 	return fmt.Sprintf("book.%s.%s", sub.Instrument, sub.Freq)
 }
 
@@ -40,23 +39,25 @@ func NewOrderbookStream(t ConnectionType, subs ...OrderbookSub) (*OrderbookStrea
 	ws := websocket.New(url, nil)
 	ws.PingInterval = 15 * time.Second
 
-	initSubs := make([]string, len(subs))
-	for i, sub := range subs {
-		initSubs[i] = sub.channel()
+	subscriptions := make(map[subscription]struct{})
+	for _, sub := range subs {
+		subscriptions[sub] = struct{}{}
 	}
 
-	return &OrderbookStream{
-		ws:                &ws,
-		msgs:              make(chan OrderbookMsg),
-		errc:              make(chan error),
-		initSubscriptions: initSubs,
-		subs:              make(map[OrderbookSub]struct{}),
-		subRequestIds:     make(map[int64]struct{}),
-		unsubRequestIds:   make(map[int64]struct{}),
-	}, nil
+	stream := &OrderbookStream{
+		ws:              &ws,
+		msgs:            make(chan OrderbookMsg),
+		errc:            make(chan error),
+		subs:            subscriptions,
+		subRequestIds:   make(map[int64]struct{}),
+		unsubRequestIds: make(map[int64]struct{}),
+	}
+	stream.ws.OnConnect = func() error { return subscribeAll[OrderbookMsg](stream) }
+
+	return stream, nil
 }
 
-func (s *OrderbookStream) subscriptions() map[OrderbookSub]struct{} {
+func (s *OrderbookStream) subscriptions() map[subscription]struct{} {
 	return s.subs
 }
 
@@ -68,7 +69,7 @@ func (s *OrderbookStream) unsubscribRequestIds() map[int64]struct{} {
 	return s.unsubRequestIds
 }
 
-func (s *OrderbookStream) parseChannel(channel string) (OrderbookSub, error) {
+func (s *OrderbookStream) parseChannel(channel string) (subscription, error) {
 	sp := strings.Split(channel, ".")
 	if len(sp) != 3 {
 		return OrderbookSub{}, fmt.Errorf("invalid orderbook channel %q", channel)
@@ -96,29 +97,8 @@ func (s *OrderbookStream) parseMessage(v *fastjson.Value) (OrderbookMsg, error) 
 	}, nil
 }
 
-// onConnect makes the channel subscriptions after the websocket connection is made,
-// either on the initial connection, or after any re-connections.
-func (s *OrderbookStream) onConnect() error {
-	// If it's the first connection, then subscribe to the set of channels specified when
-	// the stream was created, otherwise re-subscribe to the set of existing channels.
-	var channels []string
-	if len(s.initSubscriptions) > 0 {
-		channels = s.initSubscriptions
-	} else {
-		channels = make([]string, 0, len(s.subs))
-		for sub := range s.subs {
-			channels = append(channels, sub.channel())
-		}
-	}
-	id := genId()
-	subMsg, err := newSubscribeMsg(id, channels)
-	if err != nil {
-		return err
-	}
-	s.ws.Send(subMsg)
-	s.subRequestIds[id] = struct{}{}
-	s.initSubscriptions = nil
-	return nil
+func (s *OrderbookStream) websocket() *websocket.Websocket {
+	return s.ws
 }
 
 // Subscribe to a new orderbook stream.
@@ -201,7 +181,6 @@ func parseOrderbookLevels(items []*fastjson.Value) []tradekit.Level {
 // stream before any messages can be received. The connection will be automatically
 // retried on failure with exponential backoff.
 func (s *OrderbookStream) Start(ctx context.Context) error {
-	s.ws.OnConnect = s.onConnect
 	if err := s.ws.Start(ctx); err != nil {
 		return fmt.Errorf("connecting to Deribit OrderbookStream websocket: %w", err)
 	}
@@ -211,7 +190,7 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				msg, err := parseStreamMsg[OrderbookSub, OrderbookMsg](s, data, s.p)
+				msg, err := parseStreamMsg[OrderbookMsg](s, data, s.p)
 				if err != nil {
 					s.errc <- fmt.Errorf("invalid Deribit orderbook message: %w", err)
 					return

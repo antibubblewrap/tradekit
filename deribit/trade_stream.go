@@ -15,8 +15,7 @@ type TradeStream struct {
 	msgs            chan []TradeMsg
 	errc            chan error
 	p               fastjson.Parser
-	initSubs        []string
-	subs            map[TradeSub]struct{}
+	subs            map[subscription]struct{}
 	subRequestIds   map[int64]struct{}
 	unsubRequestIds map[int64]struct{}
 }
@@ -55,23 +54,26 @@ func NewTradeStream(t ConnectionType, subs ...TradeSub) (*TradeStream, error) {
 	msgs := make(chan []TradeMsg)
 	errc := make(chan error)
 
-	initSubs := make([]string, len(subs))
-	for i, sub := range subs {
-		initSubs[i] = sub.channel()
+	subscriptions := make(map[subscription]struct{})
+	for _, sub := range subs {
+		subscriptions[sub] = struct{}{}
 	}
 
-	return &TradeStream{
+	stream := &TradeStream{
 		ws:              &ws,
 		msgs:            msgs,
 		errc:            errc,
-		initSubs:        initSubs,
-		subs:            make(map[TradeSub]struct{}),
+		subs:            subscriptions,
 		subRequestIds:   make(map[int64]struct{}),
 		unsubRequestIds: make(map[int64]struct{}),
-	}, nil
+	}
+	stream.ws.OnConnect = func() error { return subscribeAll[[]TradeMsg](stream) }
+
+	return stream, nil
+
 }
 
-func (s *TradeStream) subscriptions() map[TradeSub]struct{} {
+func (s *TradeStream) subscriptions() map[subscription]struct{} {
 	return s.subs
 }
 
@@ -83,7 +85,7 @@ func (s *TradeStream) unsubscribRequestIds() map[int64]struct{} {
 	return s.unsubRequestIds
 }
 
-func (s *TradeStream) parseChannel(channel string) (TradeSub, error) {
+func (s *TradeStream) parseChannel(channel string) (subscription, error) {
 	sp := strings.Split(channel, ".")
 	if len(sp) != 3 {
 		return TradeSub{}, fmt.Errorf("invalid trade channel %q", channel)
@@ -111,29 +113,8 @@ func (s *TradeStream) parseMessage(v *fastjson.Value) ([]TradeMsg, error) {
 	return trades, nil
 }
 
-// onConnect makes the channel subscriptions after the websocket connection is made,
-// either on the initial connection, or after any re-connections.
-func (s *TradeStream) onConnect() error {
-	// If it's the first connection, then subscribe to the set of channels specified when
-	// the stream was created, otherwise re-subscribe to the set of existing channels.
-	var channels []string
-	if len(s.initSubs) > 0 {
-		channels = s.initSubs
-	} else {
-		channels = make([]string, 0, len(s.subs))
-		for sub := range s.subs {
-			channels = append(channels, sub.channel())
-		}
-	}
-	id := genId()
-	subMsg, err := newSubscribeMsg(id, channels)
-	if err != nil {
-		return err
-	}
-	s.ws.Send(subMsg)
-	s.subRequestIds[id] = struct{}{}
-	s.initSubs = nil
-	return nil
+func (s *TradeStream) websocket() *websocket.Websocket {
+	return s.ws
 }
 
 func parseTrade(v *fastjson.Value) TradeMsg {
@@ -199,7 +180,6 @@ func (s *TradeStream) Unsubscribe(subs ...TradeSub) error {
 // stream before any messages can be received. The connection will be automatically
 // retried on failure with exponential backoff.
 func (s *TradeStream) Start(ctx context.Context) error {
-	s.ws.OnConnect = s.onConnect
 	if err := s.ws.Start(ctx); err != nil {
 		return fmt.Errorf("connecting to Deribit TradeStream websocket: %w", err)
 	}
@@ -209,7 +189,7 @@ func (s *TradeStream) Start(ctx context.Context) error {
 		for {
 			select {
 			case data := <-s.ws.Messages():
-				msg, err := parseStreamMsg[TradeSub, []TradeMsg](s, data, s.p)
+				msg, err := parseStreamMsg[[]TradeMsg](s, data, s.p)
 				if err != nil {
 					s.errc <- fmt.Errorf("invalid Deribit trade message: %w", err)
 					return
