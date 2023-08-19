@@ -159,9 +159,10 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 	}
 
 	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
 		defer close(s.msgs)
 		defer s.ws.Close()
-		ticker := time.NewTicker(20 * time.Second)
 		for {
 			select {
 			case data := <-s.ws.Messages():
