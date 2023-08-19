@@ -87,7 +87,6 @@ var defaultOptions Options = Options{
 // Websocket handles a websocket client connection to a given URL.
 type Websocket struct {
 	Url           string
-	conn          *websocket.Conn
 	bufPool       *bufferPool
 	responses     chan Message
 	requests      chan []byte
@@ -122,86 +121,45 @@ func New(url string, opts *Options) Websocket {
 	}
 }
 
-func (ws *Websocket) connect(ctx context.Context) error {
-	conn, err := connect(ctx, ws.Url)
-	if err != nil {
-		return err
-	}
-	ws.conn = conn
-	return ws.OnConnect()
+func closeGoingWay(conn *websocket.Conn) error {
+	kind := websocket.FormatCloseMessage(websocket.CloseGoingAway, "")
+	return conn.WriteMessage(websocket.CloseMessage, kind)
 }
 
-// Start the websocket connection. This function creates the websocket connection and
-// immediately begins reading messages sent by the server. Start must be called before
-// any messages can be received by the consumer.
-func (ws *Websocket) Start(ctx context.Context) error {
-	defer ws.wg.Done()
-	if err := ws.connect(ctx); err != nil {
-		return err
-	}
-
-	closeGoingAway, err := websocket.NewPreparedMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
+func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{}) {
+	defer func() { done <- struct{}{} }()
+	conn, err := connect(ctx, ws.Url)
 	if err != nil {
-		return err
+		errc <- err
+		return
+	}
+	defer conn.Close()
+	if err := ws.OnConnect(); err != nil {
+		errc <- err
+		return
 	}
 
-	reconnecting := false
-	var reconnectLock sync.Mutex
-
-	reconnect := func(sendClose bool) error {
-		defer func() {
-			reconnecting = false
-			reconnectLock.Unlock()
-		}()
-		reconnecting = true
-		reconnectLock.Lock()
-		if sendClose {
-			if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
-				return err
-			}
-		}
-		if err := ws.connect(ctx); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	// Reconnect on any of these close codes
-	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater}
-
-	ws.wg.Add(1)
+	readExit := make(chan struct{}, 1)
+	stop := false
 	go func() {
-		defer func() {
-			ws.closed = true
-			close(ws.responses)
-			ws.wg.Done()
-		}()
+		defer func() { readExit <- struct{}{} }()
 		for {
-			if reconnecting {
-				// Wait until the new connection is established
-				reconnectLock.Lock()
-				reconnectLock.Unlock()
-			}
-			if ws.closed {
+			if stop {
 				return
 			}
-			_, r, err := ws.conn.NextReader()
+			_, r, err := conn.NextReader()
+			if stop {
+				return
+			}
 			if err != nil {
-				if websocket.IsCloseError(err, reconnectOn...) {
-					if err := reconnect(false); err != nil {
-						ws.errc <- err
-						return
-					}
-				} else {
-					ws.errc <- err
-					return
-				}
+				errc <- err
+				return
 			}
 			buf := ws.bufPool.get()
 			_, err = io.Copy(buf, r)
 			if err != nil {
 				ws.bufPool.put(buf)
-				ws.errc <- err
+				errc <- err
 				return
 			}
 			msg := Message{buf: buf, pool: ws.bufPool}
@@ -209,44 +167,83 @@ func (ws *Websocket) Start(ctx context.Context) error {
 		}
 	}()
 
-	resetTicker := time.NewTicker(ws.ResetInterval)
 	pingTicker := time.NewTicker(ws.PingInterval)
+	defer pingTicker.Stop()
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			stop = true
+			if err := closeGoingWay(conn); err != nil {
+				ws.errc <- err
+			}
+			break loop
+		case <-pingTicker.C:
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				stop = true
+				ws.errc <- err
+				break loop
+			}
+		case msg := <-ws.requests:
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				stop = true
+				ws.errc <- err
+				break loop
+			}
+		}
+	}
 
-	ws.wg.Add(1)
+	// Wait for the reader goroutine to finish.
+	waitFor := time.NewTimer(5 * time.Second)
+	defer waitFor.Stop()
+	select {
+	case <-waitFor.C:
+		return
+	case <-readExit:
+		return
+	}
+}
+
+// Start the websocket connection. This function creates the websocket connection and
+// immediately begins reading messages sent by the server. Start must be called before
+// any messages can be received by the consumer.
+func (ws *Websocket) Start(ctx context.Context) error {
+	restartCtx, cancel := context.WithCancel(ctx)
+	errc := make(chan error)
+	done := make(chan struct{})
+	go ws.run(restartCtx, errc, done)
+
+	// Reconnect on any of these close codes
+	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater}
+
+	resetTicker := time.NewTicker(ws.ResetInterval)
 	go func() {
-		defer func() {
-			ws.closed = true
-			ws.wg.Done()
-		}()
+		defer cancel()
 		for {
 			select {
 			case <-ctx.Done():
-				if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
-					ws.errc <- err
-				}
+				cancel()
+				<-done
 				return
 			case <-resetTicker.C:
-				if err := reconnect(true); err != nil {
+				cancel()
+				<-done
+				restartCtx, cancel = context.WithCancel(ctx)
+				go ws.run(restartCtx, errc, done)
+			case err := <-errc:
+				if websocket.IsCloseError(err, reconnectOn...) {
+					cancel()
+					<-done
+					restartCtx, cancel = context.WithCancel(ctx)
+					go ws.run(restartCtx, errc, done)
+				} else {
 					ws.errc <- err
 					return
-				}
-			case <-pingTicker.C:
-				if !reconnecting {
-					if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-						ws.errc <- err
-						return
-					}
 				}
 			case <-ws.close:
-				if err := ws.conn.WritePreparedMessage(closeGoingAway); err != nil {
-					ws.errc <- err
-				}
+				cancel()
 				return
-			case msg := <-ws.requests:
-				if err := ws.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					ws.errc <- err
-					return
-				}
+
 			}
 		}
 	}()
