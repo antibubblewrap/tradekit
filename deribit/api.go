@@ -96,18 +96,18 @@ func apiGet[T any](api *Api, endpoint string, params map[string]string) (T, erro
 	r, err := http.Get(u)
 	if err != nil {
 		var zero T
-		return zero, apiErr(endpointGetInstruments, err)
+		return zero, apiErr(endpoint, err)
 	}
 	defer r.Body.Close()
 
 	var resp rpcResponse[T]
 	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
 		var zero T
-		return zero, apiErr(endpointGetInstruments, err)
+		return zero, apiErr(endpoint, err)
 	}
 	if resp.Error != nil {
 		var zero T
-		return zero, apiErr(endpointGetInstruments, *resp.Error)
+		return zero, apiErr(endpoint, *resp.Error)
 	}
 
 	return resp.Result, nil

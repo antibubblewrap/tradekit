@@ -9,14 +9,14 @@ import (
 	"github.com/valyala/fastjson"
 )
 
-type ConnectionType int
-
 const (
 	prodEventNodeUrl string = "wss://streams.deribit.com/ws/api/v2"
 	testEventNodeUrl        = "wss://test.deribit.com/den/ws"
 	prodWsUrl               = "wss://www.deribit.com/ws/api/v2"
 	testWsUrl               = "wss://test.deribit.com/ws/api/v2"
 )
+
+type ConnectionType int
 
 const (
 	ProdEventNode ConnectionType = iota + 1

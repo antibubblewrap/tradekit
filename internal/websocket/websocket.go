@@ -147,7 +147,7 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{
 			if stop {
 				return
 			}
-			_, r, err := conn.NextReader()
+			messageType, r, err := conn.NextReader()
 			if stop {
 				return
 			}
@@ -155,15 +155,23 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{
 				errc <- err
 				return
 			}
-			buf := ws.bufPool.get()
-			_, err = io.Copy(buf, r)
-			if err != nil {
-				ws.bufPool.put(buf)
-				errc <- err
-				return
+			if messageType == websocket.PingMessage {
+				if err := conn.WriteMessage(websocket.PongMessage, nil); err != nil {
+					errc <- err
+					return
+				}
+			} else if messageType == websocket.TextMessage {
+				buf := ws.bufPool.get()
+				_, err = io.Copy(buf, r)
+				if err != nil {
+					ws.bufPool.put(buf)
+					errc <- err
+					return
+				}
+				msg := Message{buf: buf, pool: ws.bufPool}
+				ws.responses <- msg
+
 			}
-			msg := Message{buf: buf, pool: ws.bufPool}
-			ws.responses <- msg
 		}
 	}()
 
@@ -218,7 +226,10 @@ func (ws *Websocket) Start(ctx context.Context) error {
 
 	resetTicker := time.NewTicker(ws.ResetInterval)
 	go func() {
-		defer cancel()
+		defer func() {
+			ws.closed = true
+			cancel()
+		}()
 		for {
 			select {
 			case <-ctx.Done():
