@@ -119,7 +119,7 @@ func (s *OrderbookStream) Subscribe(subs ...OrderbookSub) error {
 	}
 	if len(newChannels) > 0 {
 		id := genId()
-		subMsg, err := newSubscribeMsg(id, newChannels)
+		subMsg, err := rpcSubscribeMsg(id, newChannels)
 		if err != nil {
 			return err
 		}
@@ -141,7 +141,7 @@ func (s *OrderbookStream) Unsubscribe(subs ...OrderbookSub) error {
 	}
 	if len(removeChannels) > 0 {
 		id := genId()
-		unsubMsg, err := newUnsubscribeMsg(id, removeChannels)
+		unsubMsg, err := rpcUnsubscribeMsg(id, removeChannels)
 		s.unsubRequestIds[id] = struct{}{}
 		if err != nil {
 			return err
@@ -193,8 +193,11 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 
 	go func() {
 		defer close(s.msgs)
+		defer s.ws.Close()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case data := <-s.ws.Messages():
 				msg, err := parseStreamMsg[OrderbookMsg](s, data, s.p)
 				if err != nil {

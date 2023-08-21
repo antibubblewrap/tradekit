@@ -417,10 +417,3 @@ func urlWithParams(baseUrl *url.URL, path string, params map[string]string) stri
 func apiErr(endpoint string, err error) error {
 	return fmt.Errorf("Deribit API error %s: %w", endpoint, err)
 }
-
-type rpcResponse[T any] struct {
-	Id      int    `json:"id"`
-	Testnet bool   `json:"testnet"`
-	Error   *Error `json:"error"`
-	Result  T      `json:"result"`
-}

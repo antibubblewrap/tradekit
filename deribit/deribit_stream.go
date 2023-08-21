@@ -1,7 +1,6 @@
 package deribit
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -25,17 +24,6 @@ const (
 	Prod
 )
 
-type InstrumentKind string
-
-const (
-	FutureInstrument      InstrumentKind = "future"
-	OptionInstrument                     = "option"
-	SpotInstrument                       = "spot"
-	FutureComboInstrument                = "future_combo"
-	OptionComboInstrument                = "option_combo"
-	AnyInstrument                        = "any"
-)
-
 func wsUrl(conn ConnectionType) (string, error) {
 	switch conn {
 	case ProdEventNode:
@@ -48,50 +36,6 @@ func wsUrl(conn ConnectionType) (string, error) {
 		return testWsUrl, nil
 	default:
 		return "", fmt.Errorf("invalid Deribit connection type %d", conn)
-	}
-}
-
-func newSubscribeMsg(id int64, channels []string) ([]byte, error) {
-	m := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "public/subscribe",
-		"id":      id,
-		"params": map[string]interface{}{
-			"channels": channels,
-		},
-	}
-	buf, err := json.Marshal(m)
-	return buf, err
-}
-
-func newUnsubscribeMsg(id int64, channels []string) ([]byte, error) {
-	m := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"method":  "public/unsubscribe",
-		"id":      id,
-		"params": map[string]interface{}{
-			"channels": channels,
-		},
-	}
-	buf, err := json.Marshal(m)
-	return buf, err
-}
-
-type UpdateFrequency string
-
-const (
-	UpdateRaw   UpdateFrequency = "raw"
-	Update100ms                 = "100ms"
-)
-
-func updateFreqFromString(s string) (UpdateFrequency, error) {
-	switch s {
-	case string(UpdateRaw):
-		return UpdateRaw, nil
-	case Update100ms:
-		return Update100ms, nil
-	default:
-		return "", fmt.Errorf("invalid update frequency %q", s)
 	}
 }
 
@@ -188,7 +132,7 @@ func subscribeAll[U any](s stream[U]) error {
 	}
 	for _, c := range chunk[string](channels, 100) {
 		id := genId()
-		subMsg, err := newSubscribeMsg(id, c)
+		subMsg, err := rpcSubscribeMsg(id, c)
 		if err != nil {
 			return err
 		}

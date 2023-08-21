@@ -52,7 +52,7 @@ func NewInstrumentStateStream(t ConnectionType, subs ...InstrumentStateSub) (*In
 		for i, sub := range subs {
 			channels[i] = sub.channel()
 		}
-		subMsg, err := newSubscribeMsg(id, channels)
+		subMsg, err := rpcSubscribeMsg(id, channels)
 		if err != nil {
 			return err
 		}
@@ -103,8 +103,11 @@ func (s *InstrumentStateStream) Start(ctx context.Context) error {
 
 	go func() {
 		defer close(s.msgs)
+		defer s.ws.Close()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case data := <-s.ws.Messages():
 				msg, err := s.parseInstrumentStateMsg(data)
 				if err != nil {

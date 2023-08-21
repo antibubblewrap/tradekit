@@ -150,7 +150,7 @@ func (s *TradeStream) Subscribe(subs ...TradeSub) error {
 	}
 	if len(newChannels) > 0 {
 		id := genId()
-		subMsg, err := newSubscribeMsg(id, newChannels)
+		subMsg, err := rpcSubscribeMsg(id, newChannels)
 		if err != nil {
 			return err
 		}
@@ -172,7 +172,7 @@ func (s *TradeStream) Unsubscribe(subs ...TradeSub) error {
 	}
 	if len(removeChannels) > 0 {
 		id := genId()
-		unsubMsg, err := newUnsubscribeMsg(id, removeChannels)
+		unsubMsg, err := rpcUnsubscribeMsg(id, removeChannels)
 		s.unsubRequestIds[id] = struct{}{}
 		if err != nil {
 			return err
@@ -193,8 +193,11 @@ func (s *TradeStream) Start(ctx context.Context) error {
 
 	go func() {
 		defer close(s.msgs)
+		defer s.ws.Close()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case data := <-s.ws.Messages():
 				msg, err := parseStreamMsg[[]TradeMsg](s, data, s.p)
 				if err != nil {

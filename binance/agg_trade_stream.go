@@ -25,8 +25,7 @@ type AggTrade struct {
 	M            bool    `json:"M"`
 }
 
-// AggTradesStream connects to the Binance Aggregate Trade Streams websocket. This stream
-// is available for Spot, USD-M Futures and Coin-M Futures.
+// AggTradesStream connects to the Binance Aggregate Trade Streams websocket.
 type AggTradeStream struct {
 	url     string
 	symbols []string
