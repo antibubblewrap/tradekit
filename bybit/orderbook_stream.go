@@ -22,13 +22,8 @@ type OrderbookStream struct {
 
 // Create a new stream to the Bybit orderbook websocket stream for the given symbol and
 // market depth.
-func NewOrderbookStream(market Market, depth int, symbol string) (*OrderbookStream, error) {
-	url, err := channelUrl(market)
-	if err != nil {
-		return nil, fmt.Errorf("creating Bybit OrderbookStream: %w", err)
-	}
-
-	ws := websocket.New(url, nil)
+func NewOrderbookStream(wsUrl string, depth int, symbol string) *OrderbookStream {
+	ws := websocket.New(wsUrl, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		channel := fmt.Sprintf("orderbook.%d.%s", depth, symbol)
@@ -46,7 +41,7 @@ func NewOrderbookStream(market Market, depth int, symbol string) (*OrderbookStre
 	msgs := make(chan OrderbookMsg)
 	errc := make(chan error)
 
-	return &OrderbookStream{ws: &ws, msgs: msgs, errc: errc}, nil
+	return &OrderbookStream{ws: &ws, msgs: msgs, errc: errc}
 }
 
 type OrderbookMsgData struct {

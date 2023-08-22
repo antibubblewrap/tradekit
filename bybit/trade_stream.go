@@ -33,13 +33,10 @@ type TradeStream struct {
 	p    fastjson.Parser
 }
 
-func NewTradeStream(market Market, symbol string) (*TradeStream, error) {
-	url, err := channelUrl(market)
-	if err != nil {
-		return nil, fmt.Errorf("creating Bybit TradeStream: %w", err)
-	}
-
-	ws := websocket.New(url, nil)
+// Create a new stream to the Bybit trades websocket stream for the given symbol and
+// market depth.
+func NewTradeStream(wsUrl string, symbol string) *TradeStream {
+	ws := websocket.New(wsUrl, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		channel := fmt.Sprintf("publicTrade.%s", symbol)
@@ -57,7 +54,7 @@ func NewTradeStream(market Market, symbol string) (*TradeStream, error) {
 	msgs := make(chan TradeMsg)
 	errc := make(chan error)
 
-	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}, nil
+	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}
 }
 
 func parseTradeMsgData(v *fastjson.Value) (TradeMsgData, error) {

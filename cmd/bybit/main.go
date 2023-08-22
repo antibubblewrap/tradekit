@@ -24,10 +24,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	bybitBookStream, err := bybit.NewOrderbookStream(bybit.Linear, 200, "BTCUSDT")
-	if err != nil {
-		panic(err)
-	}
+	bybitUrl := "wss://stream.bybit.com/v5/public/linear"
+	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, 200, "BTCUSDT")
 	if err := bybitBookStream.Start(ctx); err != nil {
 		panic(err)
 	}

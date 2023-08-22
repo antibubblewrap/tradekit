@@ -12,11 +12,8 @@ import (
 	"github.com/antibubblewrap/tradekit/deribit"
 )
 
-func startBybitOrderbookStream(ctx context.Context, market bybit.Market, symbol string, depth int) *bybit.OrderbookStream {
-	stream, err := bybit.NewOrderbookStream(market, depth, symbol)
-	if err != nil {
-		panic(err)
-	}
+func startBybitOrderbookStream(ctx context.Context, wsUrl string, symbol string, depth int) *bybit.OrderbookStream {
+	stream := bybit.NewOrderbookStream(wsUrl, depth, symbol)
 	if err := stream.Start(ctx); err != nil {
 		panic(err)
 	}
@@ -24,11 +21,8 @@ func startBybitOrderbookStream(ctx context.Context, market bybit.Market, symbol 
 	return stream
 }
 
-func startBybitTradeStream(ctx context.Context, market bybit.Market, symbol string) *bybit.TradeStream {
-	stream, err := bybit.NewTradeStream(market, symbol)
-	if err != nil {
-		panic(err)
-	}
+func startBybitTradeStream(ctx context.Context, wsUrl, symbol string) *bybit.TradeStream {
+	stream := bybit.NewTradeStream(wsUrl, symbol)
 	if err := stream.Start(ctx); err != nil {
 		panic(err)
 	}
@@ -68,9 +62,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	market := bybit.Linear
-	bybitBookStream := startBybitOrderbookStream(ctx, market, "BTCUSDT", 200)
-	bybitTradeStream := startBybitTradeStream(ctx, market, "BTCUSDT")
+	bybitUrl := "wss://stream.bybit.com/v5/public/linear"
+	bybitBookStream := startBybitOrderbookStream(ctx, bybitUrl, "BTCUSDT", 200)
+	bybitTradeStream := startBybitTradeStream(ctx, bybitUrl, "BTCUSDT")
 	bybit1mVolume := tradekit.NewRollingSum(time.Minute)
 
 	deribitBookStream := startDeribitOrderbookStream(ctx, "BTC-PERPETUAL")
