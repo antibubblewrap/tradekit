@@ -14,6 +14,8 @@ const (
 	methodPublicUnsubscribe rpcMethod = "public/unsubscribe"
 
 	// private methods
+	methodPrivateSubscribe           rpcMethod = "private/subscribe"
+	methodPrivateUnsubscribe         rpcMethod = "private/unsubscribe"
 	methodPrivateBuy                 rpcMethod = "private/buy"
 	methodPrivateSell                rpcMethod = "private/sell"
 	methodPrivateEdit                rpcMethod = "private/edit"

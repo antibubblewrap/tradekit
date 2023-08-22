@@ -64,11 +64,11 @@ type EditOrderOptions struct {
 	ValidUntil     int64
 }
 
-// TradingExecutor allows for placing and cancelling orders through a Deribit JSON-RPC
-// websocket connection. Each request takes a callback function which will be called with the
-// response when it is received. You can set the callback function to nil if you wish
-// to ignore the response, however, it is reccommended that you supply it so that you
-// can properly handle RPC errors.
+// TradingExecutor allows making trades through a Deribit JSON-RPC websocket connection.
+// Each request takes a callback function which will be called with the response when it
+// is received. You can set the callback function to nil if you wish to ignore the
+// response, however, it is reccommended that you supply it so that you can properly
+// handle RPC errors.
 type TradingExecutor interface {
 	// Start the executor. The executor must be started before any requests can be made.
 	Start(ctx context.Context) error
@@ -543,6 +543,7 @@ func (ex *liveTradeExecutor) EditOrder(orderId string, amount float64, opts *Edi
 func (ex *liveTradeExecutor) Err() <-chan error {
 	return ex.errc
 }
+
 
 func (ex *liveTradeExecutor) sendRPC(id int64, method rpcMethod, params interface{}) error {
 	msg, err := rpcRequestMsg(method, id, params)

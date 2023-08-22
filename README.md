@@ -47,6 +47,10 @@ See [`github.com/antibubblewrap/tradekit/deribit`](https://pkg.go.dev/github.com
     3. `GetDeliveryPrices`: returns delivery prices on an index for options / futures. 
     4. `GetIndexPrice`: returns the current price of an index.
     5. `GetLastTrades`: returns past trades for a given currency / instrument.
+  - Private APIs:
+    1. `TradingExecutor`: a connector to the Deribit private trading API over a websocket.
+       It may be used to place, edit & cancel orders, and close positions.
+    2. `UserStream`: provides streams for updates to orders placed, and trade executions.
 
 
 ## Binance Features
