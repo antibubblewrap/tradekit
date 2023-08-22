@@ -38,13 +38,8 @@ func (sub InstrumentStateSub) channel() string {
 
 // NewInstrumentStateStream creates a new InstrumentStateStream to the channel specified
 // by the given InstrumentKind and Currency.
-func NewInstrumentStateStream(t ConnectionType, subs ...InstrumentStateSub) (*InstrumentStateStream, error) {
-	url, err := wsUrl(t)
-	if err != nil {
-		return nil, err
-	}
-
-	ws := websocket.New(url, nil)
+func NewInstrumentStateStream(wsUrl string, subs ...InstrumentStateSub) (*InstrumentStateStream, error) {
+	ws := websocket.New(wsUrl, nil)
 	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		id := genId()

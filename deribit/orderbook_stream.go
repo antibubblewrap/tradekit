@@ -31,12 +31,8 @@ func (sub OrderbookSub) channel() string {
 	return fmt.Sprintf("book.%s.%s", sub.Instrument, sub.Freq)
 }
 
-func NewOrderbookStream(t ConnectionType, opts *tradekit.StreamOptions, subs ...OrderbookSub) (*OrderbookStream, error) {
-	url, err := wsUrl(t)
-	if err != nil {
-		return nil, err
-	}
-	ws := websocket.New(url, nil)
+func NewOrderbookStream(wsUrl string, opts *tradekit.StreamOptions, subs ...OrderbookSub) (*OrderbookStream, error) {
+	ws := websocket.New(wsUrl, nil)
 	ws.PingInterval = 15 * time.Second
 
 	if opts != nil {

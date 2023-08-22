@@ -9,9 +9,6 @@ import (
 )
 
 const (
-	prodApiUrl = "https://www.deribit.com/api/v2"
-	testApiUrl = "https://test.deribit.com/api/v2"
-
 	endpointGetInstruments string = "/public/get_instruments"
 	endpointGetCurrencies         = "/public/get_currencies"
 )
@@ -42,19 +39,12 @@ type Api struct {
 }
 
 // NewApi creates a new Api to either the prod or testing Deribit server.
-func NewApi(conn ConnectionType) *Api {
-	var u string
-	if conn == Prod || conn == ProdEventNode {
-		u = prodApiUrl
-	} else {
-		u = testApiUrl
-	}
-	baseUrl, err := url.Parse(u)
+func NewApi(apiUrl string) (*Api, error) {
+	baseUrl, err := url.Parse(apiUrl)
 	if err != nil {
-		panic(err) // Panic is okay because the url strings are constants
+		return nil, err
 	}
-
-	return &Api{baseUrl: baseUrl}
+	return &Api{baseUrl: baseUrl}, nil
 }
 
 // Option is the type of a Deribit option instrument.

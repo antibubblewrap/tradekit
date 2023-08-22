@@ -8,37 +8,6 @@ import (
 	"github.com/valyala/fastjson"
 )
 
-const (
-	prodEventNodeUrl string = "wss://streams.deribit.com/ws/api/v2"
-	testEventNodeUrl        = "wss://test.deribit.com/den/ws"
-	prodWsUrl               = "wss://www.deribit.com/ws/api/v2"
-	testWsUrl               = "wss://test.deribit.com/ws/api/v2"
-)
-
-type ConnectionType int
-
-const (
-	ProdEventNode ConnectionType = iota + 1
-	TestEventNode
-	Test
-	Prod
-)
-
-func wsUrl(conn ConnectionType) (string, error) {
-	switch conn {
-	case ProdEventNode:
-		return prodEventNodeUrl, nil
-	case TestEventNode:
-		return testEventNodeUrl, nil
-	case Prod:
-		return prodWsUrl, nil
-	case Test:
-		return testWsUrl, nil
-	default:
-		return "", fmt.Errorf("invalid Deribit connection type %d", conn)
-	}
-}
-
 func genId() int64 {
 	return time.Now().UnixNano()
 }

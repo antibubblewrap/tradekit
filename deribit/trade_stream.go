@@ -44,12 +44,8 @@ func (sub TradeSub) channel() string {
 	return fmt.Sprintf("trades.%s.%s", sub.Instrument, sub.Freq)
 }
 
-func NewTradeStream(t ConnectionType, opts *tradekit.StreamOptions, subs ...TradeSub) (*TradeStream, error) {
-	url, err := wsUrl(t)
-	if err != nil {
-		return nil, err
-	}
-	ws := websocket.New(url, nil)
+func NewTradeStream(wsUrl string, opts *tradekit.StreamOptions, subs ...TradeSub) (*TradeStream, error) {
+	ws := websocket.New(wsUrl, nil)
 	ws.PingInterval = 15 * time.Second
 
 	if opts != nil {
