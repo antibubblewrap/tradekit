@@ -123,11 +123,16 @@ func (s *TradeStream) Start(ctx context.Context) error {
 
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
-		defer ticker.Stop()
-		defer close(s.msgs)
-		defer s.ws.Close()
+		defer func() {
+			ticker.Stop()
+			close(s.msgs)
+			close(s.errc)
+			s.ws.Close()
+		}()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case data := <-s.ws.Messages():
 				msg, err := s.parseTradeMsg(data)
 				if err != nil {
