@@ -130,6 +130,7 @@ func New(url string, opts *Options) Websocket {
 		responses:     make(chan Message, 10),
 		requests:      make(chan []byte, 10),
 		close:         make(chan struct{}, 1),
+		errc:          make(chan error, 1),
 		OnConnect:     func() error { return nil },
 		ResetInterval: resetInterval,
 		PingInterval:  opts.PingInterval,
@@ -241,12 +242,16 @@ func (ws *Websocket) Start(ctx context.Context) error {
 		defer func() {
 			ws.closed.Store(true)
 			cancel()
+			<-done
+			close(ws.responses)
+			close(ws.requests)
+			close(ws.errc)
+			close(ws.close)
+			resetTicker.Stop()
 		}()
 		for {
 			select {
 			case <-ctx.Done():
-				cancel()
-				<-done
 				return
 			case <-resetTicker.C:
 				cancel()
@@ -264,7 +269,6 @@ func (ws *Websocket) Start(ctx context.Context) error {
 					return
 				}
 			case <-ws.close:
-				cancel()
 				return
 			}
 		}

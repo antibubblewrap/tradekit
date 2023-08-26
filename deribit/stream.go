@@ -257,20 +257,25 @@ func (s *stream[T]) subscribeAll(ws *websocket.Websocket) error {
 	if s.subscriptions.Len() == 0 {
 		return nil
 	}
-	channels := s.subscriptions.Slice()
-	id := genId()
-	params := map[string]interface{}{"channels": channels}
+
 	var method rpcMethod
 	if s.isPrivate {
 		method = methodPrivateSubscribe
 	} else {
 		method = methodPublicSubscribe
 	}
-	msg, err := rpcRequestMsg(method, id, params)
-	if err != nil {
-		return err
+
+	// make the subscriptions in chunks of maxsize 20. Otherwise, the message may be
+	// too large for the server and it will close the connection.
+	for _, channels := range chunk(s.subscriptions.Slice(), 20) {
+		id := genId()
+		params := map[string]interface{}{"channels": channels}
+		msg, err := rpcRequestMsg(method, id, params)
+		if err != nil {
+			return err
+		}
+		ws.Send(msg)
 	}
-	ws.Send(msg)
 	return nil
 }
 
@@ -308,19 +313,25 @@ func (s *stream[T]) subscribe(ws *websocket.Websocket, subs ...subscription) err
 		return nil
 	}
 
-	id := genId()
-	params := map[string]interface{}{"channels": newChannels}
 	var method rpcMethod
 	if s.isPrivate {
 		method = methodPrivateSubscribe
 	} else {
 		method = methodPublicSubscribe
 	}
-	msg, err := rpcRequestMsg(method, id, params)
-	if err != nil {
-		return err
+
+	// make the subscriptions in chunks of maxsize 20. Otherwise, the message may be
+	// too large for the server and it will close the connection.
+	for _, channels := range chunk(newChannels, 20) {
+		id := genId()
+		params := map[string]interface{}{"channels": channels}
+		msg, err := rpcRequestMsg(method, id, params)
+		if err != nil {
+			return err
+		}
+		ws.Send(msg)
+
 	}
-	ws.Send(msg)
 	return nil
 }
 
@@ -342,19 +353,25 @@ func (s *stream[T]) unsubscribe(ws *websocket.Websocket, subs ...subscription) e
 		return nil
 	}
 
-	id := genId()
-	params := map[string]interface{}{"channels": removeChannels}
 	var method rpcMethod
 	if s.isPrivate {
 		method = methodPrivateUnsubscribe
 	} else {
 		method = methodPublicUnsubscribe
 	}
-	msg, err := rpcRequestMsg(method, id, params)
-	if err != nil {
-		return err
+
+	// make the subscriptions in chunks of maxsize 20. Otherwise, the message may be
+	// too large for the server and it will close the connection.
+	for _, channels := range chunk(removeChannels, 20) {
+		id := genId()
+		params := map[string]interface{}{"channels": channels}
+		msg, err := rpcRequestMsg(method, id, params)
+		if err != nil {
+			return err
+		}
+		ws.Send(msg)
 	}
-	ws.Send(msg)
+
 	return nil
 }
 
