@@ -3,224 +3,98 @@ package deribit
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/antibubblewrap/tradekit"
-	"github.com/antibubblewrap/tradekit/internal/websocket"
-	"github.com/valyala/fastjson"
 )
 
-type TradeStream struct {
-	ws              *websocket.Websocket
-	msgs            chan []TradeMsg
-	errc            chan error
-	p               fastjson.Parser
-	subs            map[subscription]struct{}
-	subRequestIds   map[int64]struct{}
-	unsubRequestIds map[int64]struct{}
-}
-
-// TradeMsg is the message type streamed from the Deribit trade channel.
-// See https://docs.deribit.com/#trades-instrument_name-interval for more info.
-type TradeMsg struct {
-	Instrument    string  `json:"instrument_name"`
-	TradeSeq      int64   `json:"trade_seq"`
-	Timestamp     int64   `json:"timestamp"`
-	TickDirection int64   `json:"tick_direction"`
-	Price         float64 `json:"price"`
-	Amount        float64 `json:"amount"`
-	Direction     string  `json:"direction"`
-	IndexPrice    float64 `json:"index_price"`
-	MarkPrice     float64 `json:"mark_price"`
-}
-
-type TradeSub struct {
+// TradesSub represents a request to subscribe to a [NewTradeStream] channel. Either
+// Instrument or Currency & Kind must be specified. If Instrument is specified then
+// Currency and Kind are ignored. For details see:
+//   - https://docs.deribit.com/#trades-instrument_name-interval
+//   - https://docs.deribit.com/#trades-kind-currency-interval
+type TradesSub struct {
 	Instrument string
-	Freq       UpdateFrequency
+
+	Currency string
+	Kind     InstrumentKind
+
+	// Optional message frequency. Defaults to "raw" if not set.
+	Interval UpdateFrequency
 }
 
-func (sub TradeSub) channel() string {
-	return fmt.Sprintf("trades.%s.%s", sub.Instrument, sub.Freq)
-}
-
-func NewTradeStream(wsUrl string, opts *tradekit.StreamOptions, subs ...TradeSub) (*TradeStream, error) {
-	ws := websocket.New(wsUrl, nil)
-	ws.PingInterval = 15 * time.Second
-
-	if opts != nil {
-		if opts.ResetInterval != 0 {
-			ws.ResetInterval = opts.ResetInterval
+func (s TradesSub) channel() string {
+	if s.Instrument != "" {
+		if s.Interval == "" {
+			return fmt.Sprintf("trades.%s.raw", s.Instrument)
 		}
-	}
-
-	msgs := make(chan []TradeMsg)
-	errc := make(chan error)
-
-	subscriptions := make(map[subscription]struct{})
-	for _, sub := range subs {
-		subscriptions[sub] = struct{}{}
-	}
-
-	stream := &TradeStream{
-		ws:              &ws,
-		msgs:            msgs,
-		errc:            errc,
-		subs:            subscriptions,
-		subRequestIds:   make(map[int64]struct{}),
-		unsubRequestIds: make(map[int64]struct{}),
-	}
-	stream.ws.OnConnect = func() error { return subscribeAll[[]TradeMsg](stream) }
-
-	return stream, nil
-
-}
-
-func (s *TradeStream) subscriptions() map[subscription]struct{} {
-	return s.subs
-}
-
-func (s *TradeStream) subscribeRequestIds() map[int64]struct{} {
-	return s.subRequestIds
-}
-
-func (s *TradeStream) unsubscribRequestIds() map[int64]struct{} {
-	return s.unsubRequestIds
-}
-
-func (s *TradeStream) parseChannel(channel string) (subscription, error) {
-	sp := strings.Split(channel, ".")
-	if len(sp) != 3 {
-		return TradeSub{}, fmt.Errorf("invalid trade channel %q", channel)
-	}
-	if sp[0] != "trades" {
-		return TradeSub{}, fmt.Errorf("invalid trade channel %q", channel)
-	}
-	instrument := sp[1]
-	freq, err := updateFreqFromString(sp[2])
-	if err != nil {
-		return TradeSub{}, fmt.Errorf("invalid trade channel %q: %w", channel, err)
-	}
-	return TradeSub{instrument, freq}, nil
-}
-
-func (s *TradeStream) parseMessage(v *fastjson.Value) ([]TradeMsg, error) {
-	items, err := v.Array()
-	if err != nil {
-		return nil, err
-	}
-	trades := make([]TradeMsg, len(items))
-	for i, v := range items {
-		trades[i] = parseTrade(v)
-	}
-	return trades, nil
-}
-
-func (s *TradeStream) websocket() *websocket.Websocket {
-	return s.ws
-}
-
-func parseTrade(v *fastjson.Value) TradeMsg {
-	return TradeMsg{
-		Instrument:    string(v.GetStringBytes("instrument_name")),
-		TradeSeq:      v.GetInt64("trade_seq"),
-		Timestamp:     v.GetInt64("timestamp"),
-		TickDirection: v.GetInt64("tick_direction"),
-		Price:         v.GetFloat64("price"),
-		Amount:        v.GetFloat64("amount"),
-		Direction:     string(v.GetStringBytes("direction")),
-		IndexPrice:    v.GetFloat64("index_price"),
-		MarkPrice:     v.GetFloat64("mark_price"),
-	}
-}
-
-// Subscribe adds 1 or more trade subscriptions to the current stream.
-func (s *TradeStream) Subscribe(subs ...TradeSub) error {
-	// Note: we send the subscribe request here, but wait until the response is
-	// received in parseOrderBookMsg below to update the set of active subscriptions.
-	newChannels := make([]string, 0)
-	for _, sub := range subs {
-		if _, ok := s.subs[sub]; !ok {
-			newChannels = append(newChannels, sub.channel())
+		return fmt.Sprintf("trades.%s.%s", s.Instrument, s.Interval)
+	} else {
+		if s.Interval == "" {
+			return fmt.Sprintf("trades.%s.%s.raw", s.Kind, s.Currency)
 		}
+		return fmt.Sprintf("trades.%s.%s.%s", s.Kind, s.Currency, s.Interval)
 	}
-	if len(newChannels) > 0 {
-		id := genId()
-		subMsg, err := rpcSubscribeMsg(id, newChannels)
-		if err != nil {
-			return err
-		}
-		s.ws.Send(subMsg)
-		s.subRequestIds[id] = struct{}{}
-	}
-	return nil
 }
 
-// Unsubscribe removes 1 or more trade subscriptions from the current stream.
-func (s *TradeStream) Unsubscribe(subs ...TradeSub) error {
-	// Note: we send the unsubscribe request here, but wait until the response is
-	// received in parseOrderBookMsg below to update the set of active subscriptions.
-	removeChannels := make([]string, 0)
-	for _, sub := range subs {
-		if _, ok := s.subs[sub]; ok {
-			removeChannels = append(removeChannels, sub.channel())
-		}
-	}
-	if len(removeChannels) > 0 {
-		id := genId()
-		unsubMsg, err := rpcUnsubscribeMsg(id, removeChannels)
-		s.unsubRequestIds[id] = struct{}{}
-		if err != nil {
-			return err
-		}
-		s.ws.Send(unsubMsg)
-		s.unsubRequestIds[id] = struct{}{}
-	}
-	return nil
+type tradesStream struct {
+	s *stream[[]PublicTrade]
 }
 
-// Start the connection the the Deribit trade stream websocket. You must start a
-// stream before any messages can be received. The connection will be automatically
-// retried on failure with exponential backoff.
-func (s *TradeStream) Start(ctx context.Context) error {
-	if err := s.ws.Start(ctx); err != nil {
-		return fmt.Errorf("connecting to Deribit TradeStream websocket: %w", err)
+// NewTradesStream creates a new [Stream] which produces a stream of public trades.
+func NewTradesStream(wsUrl string, subscriptions ...TradesSub) Stream[[]PublicTrade, TradesSub] {
+	subs := make([]subscription, len(subscriptions))
+	for i, sub := range subscriptions {
+		subs[i] = sub
 	}
-
-	go func() {
-		defer close(s.msgs)
-		defer s.ws.Close()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-s.ws.Messages():
-				msg, err := parseStreamMsg[[]TradeMsg](s, data, s.p)
-				if err != nil {
-					s.errc <- fmt.Errorf("invalid Deribit trade message: %w", err)
-					return
-				}
-				if msg != nil {
-					s.msgs <- msg
-				}
-			case err := <-s.ws.Err():
-				s.errc <- err
-				return
-			}
-		}
-	}()
-
-	return nil
+	p := streamParams[[]PublicTrade]{
+		name:         "TradesStream",
+		wsUrl:        wsUrl,
+		isPrivate:    false,
+		parseMessage: parsePublicTrades,
+		subs:         subs,
+	}
+	s := newStream[[]PublicTrade](p)
+	return &tradesStream{s: s}
 }
 
-// Messages returns a channel producing messages received from the trade stream. It
-// should be read concurrently with the Err stream.
-func (s *TradeStream) Messages() <-chan []TradeMsg {
-	return s.msgs
+func (s *tradesStream) SetStreamOptions(opts *tradekit.StreamOptions) {
+	s.s.SetStreamOptions(opts)
 }
 
-// The error stream should be read concurrently with the  messages stream. If
-// this channel produces an error, the messages stream will be closed.
-func (s *TradeStream) Err() <-chan error {
-	return s.errc
+func (s *tradesStream) SetCredentials(c *Credentials) {
+	s.s.SetCredentials(c)
+}
+
+func (s *tradesStream) Start(ctx context.Context) error {
+	return s.s.Start(ctx)
+}
+
+func (s *tradesStream) Subscribe(subscriptions ...TradesSub) {
+	if len(subscriptions) == 0 {
+		return
+	}
+	subs := make([]subscription, len(subscriptions))
+	for i, sub := range subscriptions {
+		subs[i] = sub
+	}
+	s.s.Subscribe(subs...)
+}
+
+func (s *tradesStream) Unsubscribe(subscriptions ...TradesSub) {
+	if len(subscriptions) == 0 {
+		return
+	}
+	subs := make([]subscription, len(subscriptions))
+	for i, sub := range subscriptions {
+		subs[i] = sub
+	}
+	s.s.Subscribe(subs...)
+}
+
+func (s *tradesStream) Err() <-chan error {
+	return s.s.Err()
+}
+
+func (s *tradesStream) Messages() <-chan []PublicTrade {
+	return s.s.Messages()
 }

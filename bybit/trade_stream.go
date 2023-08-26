@@ -51,8 +51,8 @@ func NewTradeStream(wsUrl string, symbol string) *TradeStream {
 		return nil
 	}
 
-	msgs := make(chan TradeMsg)
-	errc := make(chan error)
+	msgs := make(chan TradeMsg, 10)
+	errc := make(chan error, 1)
 
 	return &TradeStream{ws: &ws, msgs: msgs, errc: errc}
 }

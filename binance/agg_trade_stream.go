@@ -36,8 +36,8 @@ type AggTradeStream struct {
 }
 
 func NewAggTradeStream(url string, symbols ...string) *AggTradeStream {
-	errc := make(chan error)
-	msgs := make(chan AggTrade)
+	errc := make(chan error, 1)
+	msgs := make(chan AggTrade, 10)
 	subIds := make(map[int64]struct{})
 	return &AggTradeStream{url: url, symbols: symbols, msgs: msgs, errc: errc, subIds: subIds}
 }

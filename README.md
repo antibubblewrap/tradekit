@@ -35,12 +35,12 @@ See [`github.com/antibubblewrap/tradekit/bybit`](https://pkg.go.dev/github.com/a
 See [`github.com/antibubblewrap/tradekit/deribit`](https://pkg.go.dev/github.com/antibubblewrap/tradekit/deribit) for all features.
 
   - Market data streams (spot, futures & options)
-    1. `TradeStream`: a realtime stream of trades.
-    2. `OrderbookStream`: a realtime stream of incremental orderbook updates. Compatible
+    1. `NewTradesStream`: a realtime stream of trades.
+    2. `NewOrderbookStream`: a realtime stream of incremental orderbook updates. Compatible
        with the `tradekit.Orderbook`.
-    3. `OrderbookDepthStream`: a stream of orderbook snapshots at a given depth. Updates
+    3. `NewOrderbookDepthStream`: a stream of orderbook snapshots at a given depth. Updates
        at 100ms intervals.
-    4. `InstrumentStateSteam`: a stream of updates about instrument states (created, closed etc.)
+    4. `NewInstrumentStateStream`: a stream of updates about instrument states (created, closed etc.)
   - HTTP API (spot, futures & options)
     1. `GetOptionInstruments`: returns all Option instruments in a given base currency.
     2. `GetCurrencies`: returns all information on all supported currencies.
@@ -50,7 +50,8 @@ See [`github.com/antibubblewrap/tradekit/deribit`](https://pkg.go.dev/github.com
   - Private APIs:
     1. `TradingExecutor`: a connector to the Deribit private trading API over a websocket.
        It may be used to place, edit & cancel orders, and close positions.
-    2. `UserStream`: provides streams for updates to orders placed, and trade executions.
+    2. `NewUserTradesStream`: a realtime stream of private trade executions.
+    3. `NewUserOrdersStream`: a realtime stream of private order updates
 
 
 ## Binance Features

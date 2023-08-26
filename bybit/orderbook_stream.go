@@ -38,8 +38,8 @@ func NewOrderbookStream(wsUrl string, depth int, symbol string) *OrderbookStream
 		return nil
 	}
 
-	msgs := make(chan OrderbookMsg)
-	errc := make(chan error)
+	msgs := make(chan OrderbookMsg, 10)
+	errc := make(chan error, 1)
 
 	return &OrderbookStream{ws: &ws, msgs: msgs, errc: errc}
 }

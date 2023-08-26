@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -68,6 +69,10 @@ func (m Message) Release() {
 }
 
 type Options struct {
+	PingInterval time.Duration
+
+	ResetInterval time.Duration
+
 	// PoolSize defines the size of the pool of pre-allocated buffers for storing data
 	// received from the websocket connection. If not set, it will be set to 32 by
 	// default.
@@ -80,8 +85,9 @@ type Options struct {
 }
 
 var defaultOptions Options = Options{
-	PoolSize:    32,
-	BufCapacity: 2048,
+	PingInterval: 15 * time.Second,
+	PoolSize:     32,
+	BufCapacity:  2048,
 }
 
 // Websocket handles a websocket client connection to a given URL.
@@ -92,7 +98,7 @@ type Websocket struct {
 	requests      chan []byte
 	close         chan struct{}
 	errc          chan error
-	closed        bool
+	closed        atomic.Bool
 	wg            sync.WaitGroup
 	OnConnect     func() error
 	ResetInterval time.Duration
@@ -109,6 +115,15 @@ func New(url string, opts *Options) Websocket {
 	if opts.PoolSize == 0 {
 		opts.PoolSize = defaultOptions.PoolSize
 	}
+	if opts.PingInterval == 0 {
+		opts.PingInterval = defaultOptions.PingInterval
+	}
+
+	resetInterval := time.Hour * 100000
+	if opts.ResetInterval != 0 {
+		resetInterval = opts.ResetInterval
+	}
+
 	return Websocket{
 		Url:           url,
 		bufPool:       newBufferPool(opts.PoolSize, opts.BufCapacity),
@@ -116,18 +131,19 @@ func New(url string, opts *Options) Websocket {
 		requests:      make(chan []byte, 10),
 		close:         make(chan struct{}, 1),
 		OnConnect:     func() error { return nil },
-		ResetInterval: time.Hour * 100000,
-		PingInterval:  time.Hour * 100000,
+		ResetInterval: resetInterval,
+		PingInterval:  opts.PingInterval,
 	}
 }
 
-func closeGoingWay(conn *websocket.Conn) error {
+func sendCloseGoingAway(conn *websocket.Conn) error {
 	kind := websocket.FormatCloseMessage(websocket.CloseGoingAway, "")
 	return conn.WriteMessage(websocket.CloseMessage, kind)
 }
 
-func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{}) {
+func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struct{}) {
 	defer func() { done <- struct{}{} }()
+
 	conn, err := connect(ctx, ws.Url)
 	if err != nil {
 		errc <- err
@@ -139,18 +155,17 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{
 		return
 	}
 
-	readExit := make(chan struct{}, 1)
-	stop := false
+	var stop atomic.Bool
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
-		defer func() { readExit <- struct{}{} }()
+		defer wg.Done()
 		for {
-			if stop {
+			if stop.Load() {
 				return
 			}
 			messageType, r, err := conn.NextReader()
-			if stop {
-				return
-			}
 			if err != nil {
 				errc <- err
 				return
@@ -175,41 +190,38 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan struct{
 		}
 	}()
 
-	pingTicker := time.NewTicker(ws.PingInterval)
-	defer pingTicker.Stop()
-loop:
-	for {
-		select {
-		case <-ctx.Done():
-			stop = true
-			if err := closeGoingWay(conn); err != nil {
-				ws.errc <- err
-			}
-			break loop
-		case <-pingTicker.C:
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				stop = true
-				ws.errc <- err
-				break loop
-			}
-		case msg := <-ws.requests:
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				stop = true
-				ws.errc <- err
-				break loop
+	wg.Add(1)
+	go func() {
+		pingTicker := time.NewTicker(ws.PingInterval)
+		defer func() {
+			stop.Store(true)
+			conn.Close()
+			pingTicker.Stop()
+			wg.Done()
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				if err := sendCloseGoingAway(conn); err != nil {
+					ws.errc <- err
+				}
+				return
+			case <-pingTicker.C:
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					ws.errc <- err
+					return
+				}
+			case msg := <-ws.requests:
+				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					ws.errc <- err
+					return
+				}
 			}
 		}
-	}
 
-	// Wait for the reader goroutine to finish.
-	waitFor := time.NewTimer(5 * time.Second)
-	defer waitFor.Stop()
-	select {
-	case <-waitFor.C:
-		return
-	case <-readExit:
-		return
-	}
+	}()
+
+	wg.Wait()
 }
 
 // Start the websocket connection. This function creates the websocket connection and
@@ -217,8 +229,8 @@ loop:
 // any messages can be received by the consumer.
 func (ws *Websocket) Start(ctx context.Context) error {
 	restartCtx, cancel := context.WithCancel(ctx)
-	errc := make(chan error)
-	done := make(chan struct{})
+	errc := make(chan error, 1)
+	done := make(chan struct{}, 1)
 	go ws.run(restartCtx, errc, done)
 
 	// Reconnect on any of these close codes
@@ -227,7 +239,7 @@ func (ws *Websocket) Start(ctx context.Context) error {
 	resetTicker := time.NewTicker(ws.ResetInterval)
 	go func() {
 		defer func() {
-			ws.closed = true
+			ws.closed.Store(true)
 			cancel()
 		}()
 		for {
@@ -254,7 +266,6 @@ func (ws *Websocket) Start(ctx context.Context) error {
 			case <-ws.close:
 				cancel()
 				return
-
 			}
 		}
 	}()
@@ -277,7 +288,7 @@ func (ws *Websocket) Messages() <-chan Message {
 // Close sends a closes the websocket connection. The Messages channel will be closed
 // immediately after.
 func (ws *Websocket) Close() {
-	if ws.closed {
+	if ws.closed.Load() {
 		return
 	}
 	ws.close <- struct{}{}

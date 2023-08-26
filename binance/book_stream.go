@@ -61,8 +61,8 @@ type OrderbookStream struct {
 // wsUrl should match the market of the Api (for example, if the wsUrl is for Spot, then
 // the Api should also be for Spot.). Updates are sent on a 100ms interval.
 func NewOrderbookStream(wsUrl string, symbol string, api *Api) *OrderbookStream {
-	errc := make(chan error)
-	msgs := make(chan BookUpdate)
+	errc := make(chan error, 1)
+	msgs := make(chan BookUpdate, 10)
 	subIds := make(map[int64]struct{})
 	return &OrderbookStream{url: wsUrl, symbol: symbol, msgs: msgs, errc: errc, subIds: subIds, api: api}
 }

@@ -35,45 +35,12 @@ func TestOrderOptions(t *testing.T) {
 		"trigger":          "index_price",
 		"valid_until":      int64(1),
 	}
-	assert.True(t, mapsEqual(expected, opts.toMap()))
-	assert.Equal(t, expected, opts.toMap())
+	params := opts.params()
+	assert.True(t, mapsEqual(expected, params))
 
 	var optsNil *OrderOptions
-	assert.Equal(t, map[string]interface{}{}, optsNil.toMap())
-}
-
-func TestCancelCurrencyOptions(t *testing.T) {
-	opts := CancelCurrencyOptions{
-		Type: TakeLimitOrder,
-		Kind: OptionInstrument,
-	}
-	expected := map[string]interface{}{"type": "take_limit", "kind": "option"}
-	assert.True(t, mapsEqual(expected, opts.toMap()))
-
-	var optsNil *CancelCurrencyOptions
-	assert.Equal(t, map[string]interface{}{}, optsNil.toMap())
-}
-
-func TestCancelInstrumentOptions(t *testing.T) {
-	opts := CancelInstrumentOptions{
-		Type: MarketLimit,
-	}
-	expected := map[string]interface{}{"type": "market_limit"}
-	assert.True(t, mapsEqual(expected, opts.toMap()))
-
-	var optsNil *CancelInstrumentOptions
-	assert.Equal(t, map[string]interface{}{}, optsNil.toMap())
-}
-
-func TestCancelLabelOptions(t *testing.T) {
-	opts := CancelLabelOptions{
-		Currency: "BTC",
-	}
-	expected := map[string]interface{}{"currency": "BTC"}
-	assert.True(t, mapsEqual(expected, opts.toMap()))
-
-	var optsNil *CancelLabelOptions
-	assert.Equal(t, map[string]interface{}{}, optsNil.toMap())
+	params = optsNil.params()
+	assert.Equal(t, map[string]interface{}{}, params)
 }
 
 func TestEditOrderOptions(t *testing.T) {
@@ -95,10 +62,78 @@ func TestEditOrderOptions(t *testing.T) {
 		"trigger_offset":   33.33,
 		"valid_until":      int64(123),
 	}
-	assert.True(t, mapsEqual(expected, opts.toMap()))
+	assert.True(t, mapsEqual(expected, opts.params()))
 
-	var optsNil *CancelLabelOptions
-	assert.Equal(t, map[string]interface{}{}, optsNil.toMap())
+	var optsNil *EditOrderOptions
+	assert.Equal(t, map[string]interface{}{}, optsNil.params())
+}
+
+func TestCancelOrderOptions(t *testing.T) {
+
+	table := []struct {
+		opts           *CancelOrderOptions
+		expectedParams map[string]interface{}
+		expectedMethod rpcMethod
+	}{
+		{
+			opts: &CancelOrderOptions{
+				Currency: "BTC",
+				Kind:     OptionInstrument,
+				Type:     LimitOrder,
+			},
+			expectedParams: map[string]interface{}{
+				"currency": "BTC",
+				"kind":     OptionInstrument,
+				"type":     LimitOrder,
+			},
+			expectedMethod: methodPrivateCancelAllCurrency,
+		},
+		{
+			opts:           &CancelOrderOptions{Instrument: "BTC-PERPETUAL"},
+			expectedParams: map[string]interface{}{"instrument_name": "BTC-PERPETUAL"},
+			expectedMethod: methodPrivateCancelAllInstrument,
+		},
+		{
+			opts: &CancelOrderOptions{
+				Label:    "abc",
+				Currency: "BTC",
+				Type:     LimitOrder, // should be ignored
+			},
+			expectedParams: map[string]interface{}{
+				"label":    "abc",
+				"currency": "BTC",
+			},
+			expectedMethod: methodPrivateCancelByLabel,
+		},
+		{
+			opts: &CancelOrderOptions{
+				Label:    "abc",
+				Currency: "BTC",
+				Type:     LimitOrder, // should be ignored
+			},
+			expectedParams: map[string]interface{}{
+				"label":    "abc",
+				"currency": "BTC",
+			},
+			expectedMethod: methodPrivateCancelByLabel,
+		},
+		{
+			opts:           &CancelOrderOptions{},
+			expectedParams: map[string]interface{}{},
+			expectedMethod: methodPrivateCancelAll,
+		},
+		{
+			opts:           nil,
+			expectedParams: map[string]interface{}{},
+			expectedMethod: methodPrivateCancelAll,
+		},
+	}
+
+	for i, test := range table {
+		method, params := test.opts.methodAndParams()
+		assert.Equal(t, test.expectedMethod, method, i)
+		assert.True(t, mapsEqual(test.expectedParams, params), i)
+	}
 }
 
 func mapsEqual(m1 map[string]interface{}, m2 map[string]interface{}) bool {
@@ -111,12 +146,5 @@ func mapsEqual(m1 map[string]interface{}, m2 map[string]interface{}) bool {
 			return false
 		}
 	}
-	for k2, v2 := range m2 {
-		v1, ok := m1[k2]
-		if !ok || v1 != v2 {
-			return false
-		}
-	}
 	return true
-
 }

@@ -40,8 +40,8 @@ type TradeStream struct {
 }
 
 func NewTradeSteam(url string, symbols ...string) *TradeStream {
-	errc := make(chan error)
-	msgs := make(chan Trade)
+	errc := make(chan error, 1)
+	msgs := make(chan Trade, 10)
 	subIds := make(map[int64]struct{})
 	return &TradeStream{url: url, symbols: symbols, msgs: msgs, errc: errc, subIds: subIds}
 }

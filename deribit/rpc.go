@@ -9,9 +9,17 @@ type rpcMethod string
 
 const (
 	// public methods
-	methodPublicAuth        rpcMethod = "public/auth"
-	methodPublicSubscribe   rpcMethod = "public/subscribe"
-	methodPublicUnsubscribe rpcMethod = "public/unsubscribe"
+	methodPublicAuth                             rpcMethod = "public/auth"
+	methodPublicSubscribe                        rpcMethod = "public/subscribe"
+	methodPublicUnsubscribe                      rpcMethod = "public/unsubscribe"
+	methodPublicGetInstruments                   rpcMethod = "public/get_instruments"
+	methodPublicGetCurrencies                    rpcMethod = "public/get_currencies"
+	methodPublicGetLastTradesByCurrency          rpcMethod = "public/get_last_trades_by_currency"
+	methodPublicGetLastTradesByCurrencyAndTime   rpcMethod = "public/get_last_trades_by_currency_and_time"
+	methodPublicGetLastTradesByInstrument        rpcMethod = "public/get_last_trades_by_instrument"
+	methodPublicGetLastTradesByInstrumentAndTime rpcMethod = "public/get_last_trades_by_instrument_and_time"
+	methodPublicGetIndexPrice                    rpcMethod = "public/get_index_price"
+	methodPublicGetDeliveryPrices                rpcMethod = "public/get_delivery_prices"
 
 	// private methods
 	methodPrivateSubscribe           rpcMethod = "private/subscribe"
@@ -23,13 +31,11 @@ const (
 	methodPrivateCancelAll           rpcMethod = "private/cancel_all"
 	methodPrivateCancelAllCurrency   rpcMethod = "private/cancel_all_by_currency"
 	methodPrivateCancelAllInstrument rpcMethod = "private/cancel_all_by_instrument"
-	methodPrivateCancelLabel         rpcMethod = "private/cancel_by_label"
+	methodPrivateCancelByLabel       rpcMethod = "private/cancel_by_label"
 	methodPrivateClosePosition       rpcMethod = "private/close_position"
+	methodPrivateGetPositions        rpcMethod = "private/get_positions"
+	methodPrivateGetPosition         rpcMethod = "private/get_position"
 )
-
-func (m rpcMethod) String() string {
-	return string(m)
-}
 
 // rpcRequestMsg creates a new request JSON-RPC request
 func rpcRequestMsg(method rpcMethod, id int64, params interface{}) ([]byte, error) {
@@ -44,35 +50,4 @@ func rpcRequestMsg(method rpcMethod, id int64, params interface{}) ([]byte, erro
 		return nil, err
 	}
 	return data, nil
-}
-
-// Create a new subscribe RPC request
-func rpcSubscribeMsg(id int64, channels []string) ([]byte, error) {
-	return rpcRequestMsg(
-		methodPublicSubscribe,
-		id,
-		map[string]interface{}{
-			"channels": channels,
-		},
-	)
-}
-
-// Create a new unsubscribe RPC request
-func rpcUnsubscribeMsg(id int64, channels []string) ([]byte, error) {
-	return rpcRequestMsg(
-		methodPublicUnsubscribe,
-		id,
-		map[string]interface{}{
-			"channels": channels,
-		},
-	)
-}
-
-// rpcResponse is the response from Deribit's JSON-RPC mechanism. Either through the
-// websocket or plain HTTP.
-type rpcResponse[T any] struct {
-	Id      int    `json:"id"`
-	Testnet bool   `json:"testnet"`
-	Error   *Error `json:"error"`
-	Result  T      `json:"result"`
 }

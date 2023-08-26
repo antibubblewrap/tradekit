@@ -1,17 +1,14 @@
 package deribit
 
-import "fmt"
-
 // InstrumentKind specifies a type of trading instrument (future, option etc.)
 type InstrumentKind string
 
 const (
 	FutureInstrument      InstrumentKind = "future"
-	OptionInstrument                     = "option"
-	SpotInstrument                       = "spot"
-	FutureComboInstrument                = "future_combo"
-	OptionComboInstrument                = "option_combo"
-	AnyInstrument                        = "any"
+	OptionInstrument      InstrumentKind = "option"
+	SpotInstrument        InstrumentKind = "spot"
+	FutureComboInstrument InstrumentKind = "future_combo"
+	OptionComboInstrument InstrumentKind = "option_combo"
 )
 
 // UpdateFrequency specifies the update frequency for a data stream.
@@ -19,7 +16,7 @@ type UpdateFrequency string
 
 const (
 	UpdateRaw   UpdateFrequency = "raw"
-	Update100ms                 = "100ms"
+	Update100ms UpdateFrequency = "100ms"
 )
 
 // OrderType represents the type of a buy or sell order.
@@ -41,18 +38,15 @@ type TimeInForce string
 
 const (
 	GTC TimeInForce = "good_til_cancelled"
-	GTD             = "good_til_day"
-	FOK             = "fill_or_kill"
-	IOC             = "immediate_or_cancel"
+	GTD TimeInForce = "good_til_day"
+	FOK TimeInForce = "fill_or_kill"
+	IOC TimeInForce = "immediate_or_cancel"
 )
 
-func updateFreqFromString(s string) (UpdateFrequency, error) {
-	switch s {
-	case string(UpdateRaw):
-		return UpdateRaw, nil
-	case Update100ms:
-		return Update100ms, nil
-	default:
-		return "", fmt.Errorf("invalid update frequency %q", s)
-	}
-}
+// TradeDirection represents the direction of a trade - buy / sell
+type TradeDirection int
+
+const (
+	Buy TradeDirection = iota
+	Sell
+)

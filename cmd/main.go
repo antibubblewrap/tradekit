@@ -12,68 +12,45 @@ import (
 	"github.com/antibubblewrap/tradekit/deribit"
 )
 
-func startBybitOrderbookStream(ctx context.Context, wsUrl string, symbol string, depth int) *bybit.OrderbookStream {
-	stream := bybit.NewOrderbookStream(wsUrl, depth, symbol)
-	if err := stream.Start(ctx); err != nil {
-		panic(err)
-	}
-	fmt.Println("ByBit book stream connected")
-	return stream
-}
-
-func startBybitTradeStream(ctx context.Context, wsUrl, symbol string) *bybit.TradeStream {
-	stream := bybit.NewTradeStream(wsUrl, symbol)
-	if err := stream.Start(ctx); err != nil {
-		panic(err)
-	}
-	fmt.Println("Bybit trade stream connected")
-	return stream
-}
-
-func startDeribitOrderbookStream(ctx context.Context, instrument string) *deribit.OrderbookStream {
-	sub := deribit.OrderbookSub{Instrument: instrument, Freq: deribit.UpdateRaw}
-	wsUrl := "wss://streams.deribit.com/ws/api/v2"
-	stream, err := deribit.NewOrderbookStream(wsUrl, nil, sub)
-	if err != nil {
-		panic(err)
-	}
-	if err := stream.Start(ctx); err != nil {
-		panic(err)
-	}
-	fmt.Println("Deribit order book stream connected")
-	return stream
-}
-
-func startDeribitTradeStream(ctx context.Context, instrument string) *deribit.TradeStream {
-	sub := deribit.TradeSub{Instrument: instrument, Freq: deribit.UpdateRaw}
-	wsUrl := "wss://streams.deribit.com/ws/api/v2"
-	stream, err := deribit.NewTradeStream(wsUrl, nil, sub)
-	if err != nil {
-		panic(err)
-	}
-	if err := stream.Start(ctx); err != nil {
-		panic(err)
-	}
-	fmt.Println("Deribit trade stream connected")
-	return stream
-}
-
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// Create a streams to the Bybit BTC trades and orderbook
 	bybitUrl := "wss://stream.bybit.com/v5/public/linear"
-	bybitBookStream := startBybitOrderbookStream(ctx, bybitUrl, "BTCUSDT", 200)
-	bybitTradeStream := startBybitTradeStream(ctx, bybitUrl, "BTCUSDT")
-	bybit1mVolume := tradekit.NewRollingSum(time.Minute)
+	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, 200, "BTCUSDT")
+	bybitTradeStream := bybit.NewTradeStream(bybitUrl, "BTCUSDT")
 
-	deribitBookStream := startDeribitOrderbookStream(ctx, "BTC-PERPETUAL")
-	deribitTradeStream := startDeribitTradeStream(ctx, "BTC-PERPETUAL")
+	// Create streams to the Deribit BTC trades and orderbook
+	deribitUrl := "wss://streams.deribit.com/ws/api/v2"
+	sub1 := deribit.TradesSub{Instrument: "BTC-PERPETUAL"}
+	sub2 := deribit.OrderbookSub{Instrument: "BTC-PERPETUAL"}
+	deribitTradeStream := deribit.NewTradesStream(deribitUrl, sub1)
+	deribitBookStream := deribit.NewOrderbookStream(deribitUrl, sub2)
+
+	// Start the streams
+	if err := deribitTradeStream.Start(ctx); err != nil {
+		panic(err)
+	}
+	if err := deribitBookStream.Start(ctx); err != nil {
+		panic(err)
+	}
+	if err := bybitBookStream.Start(ctx); err != nil {
+		panic(err)
+	}
+	if err := bybitTradeStream.Start(ctx); err != nil {
+		panic(err)
+	}
+
+	// Gather some metrics
+	bybit1mVolume := tradekit.NewRollingSum(time.Minute)
 	deribitMidPriceEWMA := tradekit.NewEWMA(time.Minute)
 
+	// Maintain a local order book for Bybit and Deribit
 	bybitBook := tradekit.NewOrderbook(nil, nil)
 	deribitBook := tradekit.NewOrderbook(nil, nil)
 
+	// Read the streams
 	n := 0
 	elapsed := 0
 	ticker := time.NewTicker(10 * time.Second)
@@ -110,7 +87,7 @@ func main() {
 			}
 			deribitMidPriceEWMA.Update(deribitBook.MidPrice(), msg.Timestamp)
 		case _ = <-deribitTradeStream.Messages():
-			// Do something with the trade message
+			// do something with the trade ...
 		case <-ticker.C:
 			fmt.Printf("Deribit midprice 1 min EWMA = %.2f\n", deribitMidPriceEWMA.Value)
 			fmt.Printf("Bybit 1 min rolling volume = %.2f\n", bybit1mVolume.Value())

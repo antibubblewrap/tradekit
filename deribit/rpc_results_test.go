@@ -7,7 +7,7 @@ import (
 	"github.com/valyala/fastjson"
 )
 
-func TestParseBuyResult(t *testing.T) {
+func TestParseOrderStateBuy(t *testing.T) {
 	input := `
 	  {
 		"trades": [
@@ -60,7 +60,7 @@ func TestParseBuyResult(t *testing.T) {
 		}
 	  }	
 	`
-	expected := BuyResult{
+	expected := OrderUpdate{
 		Trades: []TradeExecution{
 			{
 				TradeSeq:       1966056,
@@ -71,7 +71,7 @@ func TestParseBuyResult(t *testing.T) {
 				Liquidity:      "T",
 				InstrumentName: "ETH-PERPETUAL",
 				Fee:            0.00014757,
-				Direction:      "buy",
+				Direction:      Buy,
 				Amount:         40,
 			},
 		},
@@ -101,10 +101,10 @@ func TestParseBuyResult(t *testing.T) {
 	var p fastjson.Parser
 	v, err := p.Parse(input)
 	assert.Nil(t, err)
-	assert.Equal(t, expected, parseBuyResult(v))
+	assert.Equal(t, expected, parseOrderUpdate(v))
 }
 
-func TestSellResult(t *testing.T) {
+func TestParseOrderStateSell(t *testing.T) {
 	input := `
 	  {
 		"trades": [],
@@ -133,7 +133,7 @@ func TestSellResult(t *testing.T) {
       }	
 	`
 
-	expected := SellResult{
+	expected := OrderUpdate{
 		Trades: []TradeExecution{},
 		Order: Order{
 			Triggered:           false,
@@ -161,10 +161,10 @@ func TestSellResult(t *testing.T) {
 	var p fastjson.Parser
 	v, err := p.Parse(input)
 	assert.Nil(t, err)
-	assert.Equal(t, expected, parseSellResult(v))
+	assert.Equal(t, expected, parseOrderUpdate(v))
 }
 
-func TestParseEditREsult(t *testing.T) {
+func TestParseOrderStateEdit(t *testing.T) {
 	input := `
 	  {
 		"trades": [],
@@ -195,7 +195,7 @@ func TestParseEditREsult(t *testing.T) {
 	  }	
 	`
 
-	expected := EditResult{
+	expected := OrderUpdate{
 		Trades: []TradeExecution{},
 		Order: Order{
 			TimeInForce:         GTC,
@@ -214,10 +214,10 @@ func TestParseEditREsult(t *testing.T) {
 	var p fastjson.Parser
 	v, err := p.Parse(input)
 	assert.Nil(t, err)
-	assert.Equal(t, expected, parseEditResult(v))
+	assert.Equal(t, expected, parseOrderUpdate(v))
 }
 
-func TestCloseResult(t *testing.T) {
+func TestParseOrderStateClose(t *testing.T) {
 	input := `
 	{
 		"trades": [
@@ -270,7 +270,7 @@ func TestCloseResult(t *testing.T) {
 	  }	
 	`
 
-	expected := CloseResult{
+	expected := OrderUpdate{
 		Trades: []TradeExecution{
 			{
 				TradeSeq:       1966068,
@@ -281,7 +281,7 @@ func TestCloseResult(t *testing.T) {
 				Liquidity:      "T",
 				InstrumentName: "ETH-PERPETUAL",
 				Fee:            0.00007766,
-				Direction:      "sell",
+				Direction:      Sell,
 				Amount:         21,
 			},
 		},
@@ -308,5 +308,104 @@ func TestCloseResult(t *testing.T) {
 	var p fastjson.Parser
 	v, err := p.Parse(input)
 	assert.Nil(t, err)
-	assert.Equal(t, expected, parseCloseResult(v))
+	assert.Equal(t, expected, parseOrderUpdate(v))
+}
+
+func TestParsePosition(t *testing.T) {
+	input := `
+	{
+		"average_price": 0,
+		"delta": 0,
+		"direction": "buy",
+		"estimated_liquidation_price": 0,
+		"floating_profit_loss": 0,
+		"index_price": 3555.86,
+		"initial_margin": 0,
+		"instrument_name": "BTC-PERPETUAL",
+		"interest_value" : 1.7362511643080387,
+		"leverage": 100,
+		"kind": "future",
+		"maintenance_margin": 0,
+		"mark_price": 3556.62,
+		"open_orders_margin": 0.000165889,
+		"realized_profit_loss": 0,
+		"settlement_price": 3555.44,
+		"size": 0,
+		"size_currency": 0,
+		"total_profit_loss": 0
+	}
+	`
+	expected := Position{
+		Direction:        "buy",
+		IndexPrice:       3555.86,
+		InstrumentName:   "BTC-PERPETUAL",
+		InterestValue:    1.7362511643080387,
+		Leverage:         100,
+		Kind:             "future",
+		MarkPrice:        3556.62,
+		OpenOrdersMargin: 0.000165889,
+		SettlementPrice:  3555.44,
+	}
+
+	var p fastjson.Parser
+	v, err := p.Parse(input)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, parsePosition(v))
+}
+
+func TestParsePositions(t *testing.T) {
+	input := `
+	[
+      {
+          "average_price": 7440.18,
+          "delta": 0.006687487,
+          "direction": "buy",
+          "estimated_liquidation_price": 1.74,
+          "floating_profit_loss": 0,
+          "index_price": 7466.79,
+          "initial_margin": 0.000197283,
+          "instrument_name": "BTC-PERPETUAL",
+          "interest_value" : 1.7362511643080387,
+          "kind": "future",
+          "leverage": 34,
+          "maintenance_margin": 0.000143783,
+          "mark_price": 7476.65,
+          "open_orders_margin": 0.000197288,
+          "realized_funding": -0.001,
+          "realized_profit_loss": -0.0001,
+          "settlement_price": 7476.65,
+          "size": 50,
+          "size_currency": 0.006687487,
+          "total_profit_loss": 0.000032781
+      }
+  	]	
+	`
+	expected := []Position{
+		{
+			AveragePrice:              7440.18,
+			Delta:                     0.006687487,
+			Direction:                 "buy",
+			EstimatedLiquidationPrice: 1.74,
+			IndexPrice:                7466.79,
+			InitialMargin:             0.000197283,
+			InstrumentName:            "BTC-PERPETUAL",
+			InterestValue:             1.7362511643080387,
+			Kind:                      FutureInstrument,
+			Leverage:                  34,
+			MaintenanceMargin:         0.000143783,
+			MarkPrice:                 7476.65,
+			OpenOrdersMargin:          0.000197288,
+			RealizedFunding:           -0.001,
+			RealizedProfitLoss:        -0.0001,
+			SettlementPrice:           7476.65,
+			Size:                      50,
+			SizeCurrency:              0.006687487,
+			TotalProfitLoss:           0.000032781,
+		},
+	}
+
+	var p fastjson.Parser
+	v, err := p.Parse(input)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, parsePositions(v))
 }
