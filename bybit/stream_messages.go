@@ -10,35 +10,35 @@ import (
 )
 
 type OrderbookUpdate struct {
-	Topic     string
-	Type      string
-	Timestamp int64
-	Data      OrderbookUpdateData
+	Topic     string              `json:"topic"`
+	Type      string              `json:"type"`
+	Timestamp int64               `json:"ts"`
+	Data      OrderbookUpdateData `json:"data"`
 }
 
 type OrderbookUpdateData struct {
-	Symbol   string
-	Bids     []tradekit.Level
-	Asks     []tradekit.Level
-	UpdateID int64
-	Sequence int64
+	Symbol   string           `json:"s"`
+	Bids     []tradekit.Level `json:"b"`
+	Asks     []tradekit.Level `json:"a"`
+	UpdateID int64            `json:"u"`
+	Sequence int64            `json:"seq"`
 }
 
 type Trades struct {
-	Topic     string
-	Type      string
-	Timestamp int64
-	Data      []Trade
+	Topic     string  `json:"topic"`
+	Type      string  `json:"type"`
+	Timestamp int64   `json:"ts"`
+	Data      []Trade `json:"data"`
 }
 
 type Trade struct {
-	FilledTimestamp int64
-	Symbol          string
-	Direction       TradeDirection
-	Price           float64
-	Amount          float64
-	TradeID         string
-	BlockTrade      bool
+	FilledTimestamp int64          `json:"T"`
+	Symbol          string         `json:"s"`
+	Direction       TradeDirection `json:"S"`
+	Price           float64        `json:"p"`
+	Amount          float64        `json:"v"`
+	TradeID         string         `json:"i"`
+	BlockTrade      bool           `json:"BT"`
 }
 
 func parsePriceLevel(v *fastjson.Value) (tradekit.Level, error) {
