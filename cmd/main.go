@@ -18,8 +18,8 @@ func main() {
 
 	// Create a streams to the Bybit BTC trades and orderbook
 	bybitUrl := "wss://stream.bybit.com/v5/public/linear"
-	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, 200, "BTCUSDT")
-	bybitTradeStream := bybit.NewTradeStream(bybitUrl, "BTCUSDT")
+	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, bybit.OrderbookSub{Symbol: "BTCUSDT", Depth: 200})
+	bybitTradeStream := bybit.NewTradesStream(bybitUrl, bybit.TradesSub{Symbol: "BTCUSDT"})
 
 	// Create streams to the Deribit BTC trades and orderbook
 	deribitUrl := "wss://streams.deribit.com/ws/api/v2"

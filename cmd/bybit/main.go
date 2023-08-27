@@ -25,7 +25,8 @@ func main() {
 	defer stop()
 
 	bybitUrl := "wss://stream.bybit.com/v5/public/linear"
-	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, 200, "BTCUSDT")
+	sub := bybit.OrderbookSub{Symbol: "BTCUSDT", Depth: 200}
+	bybitBookStream := bybit.NewOrderbookStream(bybitUrl, sub)
 	if err := bybitBookStream.Start(ctx); err != nil {
 		panic(err)
 	}
