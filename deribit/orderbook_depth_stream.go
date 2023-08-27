@@ -1,10 +1,7 @@
 package deribit
 
 import (
-	"context"
 	"fmt"
-
-	"github.com/antibubblewrap/tradekit"
 )
 
 // OrderbookDepthSub represents a subscription to a deribit orderbook depth stream created
@@ -27,68 +24,18 @@ func (sub OrderbookDepthSub) channel() string {
 	}
 }
 
-type bookDepthStream struct {
-	s *stream[OrderbookDepth]
-}
-
 // NewOrderbookDepthStream creates a new [Stream] which produces a stream of orderbook
 // depth snapshots. For a realtime stream of incremental orderbook updates, see
 // [NewOrderbookStream]. For details see:
 //   - https://docs.deribit.com/#book-instrument_name-group-depth-interval
 func NewOrderbookDepthStream(wsUrl string, subscriptions ...OrderbookDepthSub) Stream[OrderbookDepth, OrderbookDepthSub] {
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	p := streamParams[OrderbookDepth]{
+	p := streamParams[OrderbookDepth, OrderbookDepthSub]{
 		name:         "OrderbookDepthStream",
 		wsUrl:        wsUrl,
 		isPrivate:    false,
 		parseMessage: parseOrderbookDepth,
-		subs:         subs,
+		subs:         subscriptions,
 	}
 	s := newStream[OrderbookDepth](p)
-	return &bookDepthStream{s: s}
-}
-
-func (s *bookDepthStream) Start(ctx context.Context) error {
-	return s.s.Start(ctx)
-}
-
-func (s *bookDepthStream) SetCredentials(c *Credentials) {
-	s.s.SetCredentials(c)
-}
-
-func (s *bookDepthStream) SetStreamOptions(opts *tradekit.StreamOptions) {
-	s.s.SetStreamOptions(opts)
-}
-
-func (s *bookDepthStream) Subscribe(subscriptions ...OrderbookDepthSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *bookDepthStream) Unsubscribe(subscriptions ...OrderbookDepthSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *bookDepthStream) Err() <-chan error {
-	return s.s.Err()
-}
-
-func (s *bookDepthStream) Messages() <-chan OrderbookDepth {
-	return s.s.Messages()
+	return s
 }

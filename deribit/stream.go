@@ -59,7 +59,7 @@ type Stream[T any, U subscription] interface {
 
 // stream makes subscriptions to Deribit channels and provides a channel to receive
 // the messages they produce.
-type stream[T any] struct {
+type stream[T any, U subscription] struct {
 	name          string
 	url           string
 	msgs          chan T
@@ -70,8 +70,8 @@ type stream[T any] struct {
 	opts          *tradekit.StreamOptions
 	credentials   *Credentials
 
-	subRequests          chan []subscription
-	unsubRequests        chan []subscription
+	subRequests          chan []U
+	unsubRequests        chan []U
 	subscribeAllRequests chan struct{}
 
 	closed atomic.Bool
@@ -82,22 +82,22 @@ type subscription interface {
 	channel() string
 }
 
-type streamParams[T any] struct {
+type streamParams[T any, U subscription] struct {
 	name         string
 	wsUrl        string
 	isPrivate    bool
 	parseMessage func(*fastjson.Value) T
-	subs         []subscription
+	subs         []U
 }
 
-func newStream[T any](p streamParams[T]) *stream[T] {
+func newStream[T any, U subscription](p streamParams[T, U]) *stream[T, U] {
 
 	channels := make([]string, len(p.subs))
 	for i, sub := range p.subs {
 		channels[i] = sub.channel()
 	}
 
-	return &stream[T]{
+	return &stream[T, U]{
 		name:                 p.name,
 		url:                  p.wsUrl,
 		msgs:                 make(chan T, 10),
@@ -105,21 +105,21 @@ func newStream[T any](p streamParams[T]) *stream[T] {
 		parseMessage:         p.parseMessage,
 		subscriptions:        set.New[string](channels...),
 		isPrivate:            p.isPrivate,
-		subRequests:          make(chan []subscription, 10),
-		unsubRequests:        make(chan []subscription, 10),
+		subRequests:          make(chan []U, 10),
+		unsubRequests:        make(chan []U, 10),
 		subscribeAllRequests: make(chan struct{}, 10),
 	}
 }
 
-func (s *stream[T]) SetStreamOptions(opts *tradekit.StreamOptions) {
+func (s *stream[T, U]) SetStreamOptions(opts *tradekit.StreamOptions) {
 	s.opts = opts
 }
 
-func (s *stream[T]) SetCredentials(c *Credentials) {
+func (s *stream[T, U]) SetCredentials(c *Credentials) {
 	s.credentials = c
 }
 
-func (s *stream[T]) Start(ctx context.Context) error {
+func (s *stream[T, U]) Start(ctx context.Context) error {
 	var wsOpts websocket.Options
 	if s.opts != nil {
 		if s.opts.BufferCapacity != 0 {
@@ -215,7 +215,7 @@ func (s *stream[T]) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *stream[T]) handleMessage(msg websocket.Message) error {
+func (s *stream[T, U]) handleMessage(msg websocket.Message) error {
 	defer msg.Release()
 
 	v, err := s.p.ParseBytes(msg.Data())
@@ -250,7 +250,7 @@ func (s *stream[T]) handleMessage(msg websocket.Message) error {
 }
 
 // Subscribe to all of the stream's subscriptions
-func (s *stream[T]) subscribeAll(ws *websocket.Websocket) error {
+func (s *stream[T, U]) subscribeAll(ws *websocket.Websocket) error {
 	if s.closed.Load() {
 		return errors.New("stream is closed")
 	}
@@ -279,14 +279,14 @@ func (s *stream[T]) subscribeAll(ws *websocket.Websocket) error {
 	return nil
 }
 
-func (s *stream[T]) Subscribe(subs ...subscription) {
+func (s *stream[T, U]) Subscribe(subs ...U) {
 	if s.closed.Load() {
 		return
 	}
 	s.subRequests <- subs
 }
 
-func (s *stream[T]) Unsubscribe(subs ...subscription) {
+func (s *stream[T, U]) Unsubscribe(subs ...U) {
 	if s.closed.Load() {
 		return
 	}
@@ -296,7 +296,7 @@ func (s *stream[T]) Unsubscribe(subs ...subscription) {
 // subscribe to the provided slice of channels. If a channel already exists in the
 // stream's subscriptions then it will be ignored. Returns an error if the stream is
 // closed.
-func (s *stream[T]) subscribe(ws *websocket.Websocket, subs ...subscription) error {
+func (s *stream[T, U]) subscribe(ws *websocket.Websocket, subs ...U) error {
 	if s.closed.Load() {
 		return errors.New("stream is closed")
 	}
@@ -337,7 +337,7 @@ func (s *stream[T]) subscribe(ws *websocket.Websocket, subs ...subscription) err
 
 // unsubscribe from the provided slice of channels. Returns an error if the stream is
 // closed.
-func (s *stream[T]) unsubscribe(ws *websocket.Websocket, subs ...subscription) error {
+func (s *stream[T, U]) unsubscribe(ws *websocket.Websocket, subs ...U) error {
 	if s.closed.Load() {
 		return errors.New("stream is closed")
 	}
@@ -375,20 +375,20 @@ func (s *stream[T]) unsubscribe(ws *websocket.Websocket, subs ...subscription) e
 	return nil
 }
 
-func (s *stream[T]) Err() <-chan error {
+func (s *stream[T, U]) Err() <-chan error {
 	return s.errc
 }
 
-func (s *stream[T]) Messages() <-chan T {
+func (s *stream[T, U]) Messages() <-chan T {
 	return s.msgs
 }
 
-func (s *stream[T]) nameErr(err error) error {
+func (s *stream[T, U]) nameErr(err error) error {
 	return fmt.Errorf("Deribit %s: %w", s.name, err)
 }
 
 // Send an authentication request along the stream's websocket
-func (s *stream[T]) authenticate(ws *websocket.Websocket) (id int64, err error) {
+func (s *stream[T, U]) authenticate(ws *websocket.Websocket) (id int64, err error) {
 	id = genId()
 	method := methodPublicAuth
 	params := map[string]string{

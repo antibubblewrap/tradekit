@@ -1,10 +1,7 @@
 package deribit
 
 import (
-	"context"
 	"fmt"
-
-	"github.com/antibubblewrap/tradekit"
 )
 
 // TradesSub represents a request to subscribe to a [NewTradeStream] channel. Either
@@ -36,65 +33,14 @@ func (s TradesSub) channel() string {
 	}
 }
 
-type tradesStream struct {
-	s *stream[[]PublicTrade]
-}
-
 // NewTradesStream creates a new [Stream] which produces a stream of public trades.
 func NewTradesStream(wsUrl string, subscriptions ...TradesSub) Stream[[]PublicTrade, TradesSub] {
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	p := streamParams[[]PublicTrade]{
+	p := streamParams[[]PublicTrade, TradesSub]{
 		name:         "TradesStream",
 		wsUrl:        wsUrl,
 		isPrivate:    false,
 		parseMessage: parsePublicTrades,
-		subs:         subs,
+		subs:         subscriptions,
 	}
-	s := newStream[[]PublicTrade](p)
-	return &tradesStream{s: s}
-}
-
-func (s *tradesStream) SetStreamOptions(opts *tradekit.StreamOptions) {
-	s.s.SetStreamOptions(opts)
-}
-
-func (s *tradesStream) SetCredentials(c *Credentials) {
-	s.s.SetCredentials(c)
-}
-
-func (s *tradesStream) Start(ctx context.Context) error {
-	return s.s.Start(ctx)
-}
-
-func (s *tradesStream) Subscribe(subscriptions ...TradesSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *tradesStream) Unsubscribe(subscriptions ...TradesSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *tradesStream) Err() <-chan error {
-	return s.s.Err()
-}
-
-func (s *tradesStream) Messages() <-chan []PublicTrade {
-	return s.s.Messages()
+	return newStream[[]PublicTrade](p)
 }

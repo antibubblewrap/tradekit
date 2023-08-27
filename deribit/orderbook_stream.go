@@ -1,10 +1,7 @@
 package deribit
 
 import (
-	"context"
 	"fmt"
-
-	"github.com/antibubblewrap/tradekit"
 )
 
 // OrderbookSub represents a request to subscribe to a [NewOrderbookStream] channel.
@@ -25,10 +22,6 @@ func (sub OrderbookSub) channel() string {
 	}
 }
 
-type orderbookStream struct {
-	s *stream[OrderbookUpdate]
-}
-
 // NewOrderbookStream creates a new [Stream] which produces a stream of incremental
 // orderbook updates. For a stream of orderbook depth snapshots, see [NewOrderbookDepthStream]
 // For details see:
@@ -38,55 +31,13 @@ func NewOrderbookStream(wsUrl string, subscriptions ...OrderbookSub) Stream[Orde
 	for i, sub := range subscriptions {
 		subs[i] = sub
 	}
-	p := streamParams[OrderbookUpdate]{
+	p := streamParams[OrderbookUpdate, OrderbookSub]{
 		name:         "OrderbookStream",
 		wsUrl:        wsUrl,
 		isPrivate:    false,
 		parseMessage: parseOrderbookUpdate,
-		subs:         subs,
+		subs:         subscriptions,
 	}
 	s := newStream[OrderbookUpdate](p)
-	return &orderbookStream{s: s}
-}
-
-func (s *orderbookStream) Start(ctx context.Context) error {
-	return s.s.Start(ctx)
-}
-
-func (s *orderbookStream) SetCredentials(c *Credentials) {
-	s.s.SetCredentials(c)
-}
-
-func (s *orderbookStream) SetStreamOptions(opts *tradekit.StreamOptions) {
-	s.s.SetStreamOptions(opts)
-}
-
-func (s *orderbookStream) Subscribe(subscriptions ...OrderbookSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *orderbookStream) Unsubscribe(subscriptions ...OrderbookSub) {
-	if len(subscriptions) == 0 {
-		return
-	}
-	subs := make([]subscription, len(subscriptions))
-	for i, sub := range subscriptions {
-		subs[i] = sub
-	}
-	s.s.Subscribe(subs...)
-}
-
-func (s *orderbookStream) Err() <-chan error {
-	return s.s.Err()
-}
-
-func (s *orderbookStream) Messages() <-chan OrderbookUpdate {
-	return s.s.Messages()
+	return s
 }
