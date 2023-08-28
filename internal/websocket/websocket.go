@@ -137,11 +137,6 @@ func New(url string, opts *Options) Websocket {
 	}
 }
 
-func sendCloseGoingAway(conn *websocket.Conn) error {
-	kind := websocket.FormatCloseMessage(websocket.CloseGoingAway, "")
-	return conn.WriteMessage(websocket.CloseMessage, kind)
-}
-
 func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struct{}) {
 	defer func() { done <- struct{}{} }()
 
@@ -203,9 +198,6 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struc
 		for {
 			select {
 			case <-ctx.Done():
-				if err := sendCloseGoingAway(conn); err != nil {
-					ws.errc <- err
-				}
 				return
 			case <-pingTicker.C:
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
