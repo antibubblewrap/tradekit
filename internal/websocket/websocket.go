@@ -230,7 +230,7 @@ func (ws *Websocket) Start(ctx context.Context) error {
 	go ws.run(restartCtx, errc, done)
 
 	// Reconnect on any of these close codes
-	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater}
+	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater, websocket.CloseAbnormalClosure}
 
 	resetTicker := time.NewTicker(ws.ResetInterval)
 	go func() {
