@@ -41,6 +41,21 @@ type Trade struct {
 	BlockTrade      bool           `json:"BT"`
 }
 
+type Liquidation struct {
+	Topic     string          `json:"topic"`
+	Type      string          `json:"type"`
+	Timestamp int64           `json:"ts"`
+	Data      LiquidationData `json:"data"`
+}
+
+type LiquidationData struct {
+	Price       float64        `json:"price"`
+	Amount      float64        `json:"size"`
+	Direction   TradeDirection `json:"side"`
+	Symbol      string         `json:"symbol"`
+	UpdatedTime int64          `json:"updatedTime"`
+}
+
 func parsePriceLevel(v *fastjson.Value) (tradekit.Level, error) {
 	priceS := string(v.GetStringBytes("0"))
 	price, err := strconv.ParseFloat(priceS, 64)
@@ -161,5 +176,40 @@ func parseTrades(v *fastjson.Value) (Trades, error) {
 		Type:      string(v.GetStringBytes("type")),
 		Timestamp: v.GetInt64("ts"),
 		Data:      trades,
+	}, nil
+}
+
+func parseLiquidationData(v *fastjson.Value) (LiquidationData, error) {
+	priceS := string(v.GetStringBytes("price"))
+	price, err := strconv.ParseFloat(priceS, 64)
+	if err != nil {
+		return LiquidationData{}, fmt.Errorf("invalid price %q", priceS)
+	}
+
+	amountS := string(v.GetStringBytes("size"))
+	amount, err := strconv.ParseFloat(amountS, 64)
+	if err != nil {
+		return LiquidationData{}, fmt.Errorf("invalid size %q", amountS)
+	}
+
+	return LiquidationData{
+		Price:       price,
+		Amount:      amount,
+		Direction:   parseTradeDirection(v.GetStringBytes("side")),
+		Symbol:      string(v.GetStringBytes("symbol")),
+		UpdatedTime: v.GetInt64("updatedTime"),
+	}, nil
+}
+
+func parseLiquidation(v *fastjson.Value) (Liquidation, error) {
+	data, err := parseLiquidationData(v.Get("data"))
+	if err != nil {
+		return Liquidation{}, err
+	}
+	return Liquidation{
+		Topic:     string(v.GetStringBytes("topic")),
+		Timestamp: v.GetInt64("ts"),
+		Type:      string(v.GetStringBytes("type")),
+		Data:      data,
 	}, nil
 }

@@ -114,3 +114,40 @@ func TestParseOrderbookUpdte(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expected, msg)
 }
+
+func TestParseLiquidation(t *testing.T) {
+	input := `
+	{
+		"data": {
+			"price": "0.03803",
+			"side": "Buy",
+			"size": "1637",
+			"symbol": "GALAUSDT",
+			"updatedTime": 1673251091822
+		},
+		"topic": "liquidation.GALAUSDT",
+		"ts": 1673251091822,
+		"type": "snapshot"
+	}	
+	`
+	expected := Liquidation{
+		Data: LiquidationData{
+			Price:       0.03803,
+			Direction:   Buy,
+			Amount:      1637,
+			Symbol:      "GALAUSDT",
+			UpdatedTime: 1673251091822,
+		},
+		Topic:     "liquidation.GALAUSDT",
+		Timestamp: 1673251091822,
+		Type:      "snapshot",
+	}
+
+	var p fastjson.Parser
+	v, err := p.Parse(input)
+	assert.Nil(t, err)
+	msg, err := parseLiquidation(v)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, msg)
+
+}
