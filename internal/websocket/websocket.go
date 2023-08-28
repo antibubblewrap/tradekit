@@ -145,7 +145,6 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struc
 		errc <- err
 		return
 	}
-	defer conn.Close()
 	if err := ws.OnConnect(); err != nil {
 		errc <- err
 		return
