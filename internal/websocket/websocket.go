@@ -155,7 +155,10 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struc
 
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer func() {
+			conn.Close()
+			wg.Done()
+		}()
 		for {
 			if stop.Load() {
 				return
@@ -189,22 +192,23 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struc
 	go func() {
 		pingTicker := time.NewTicker(ws.PingInterval)
 		defer func() {
-			stop.Store(true)
-			conn.Close()
 			pingTicker.Stop()
 			wg.Done()
 		}()
 		for {
 			select {
 			case <-ctx.Done():
+				stop.Store(true)
 				return
 			case <-pingTicker.C:
 				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					stop.Store(true)
 					ws.errc <- err
 					return
 				}
 			case msg := <-ws.requests:
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					stop.Store(true)
 					ws.errc <- err
 					return
 				}
