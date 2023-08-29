@@ -15,7 +15,7 @@ func (s LiquidationSub) channel() string {
 
 // NewLiquidationStream returns a stream of liquidations. For details see:
 //   - https://bybit-exchange.github.io/docs/v5/websocket/public/liquidation
-func NewLiquidationStream(wsUrl string, subs ...TradesSub) Stream[Liquidation] {
+func NewLiquidationStream(wsUrl string, subs ...LiquidationSub) Stream[Liquidation] {
 	subscriptions := make([]subscription, len(subs))
 	for i, sub := range subs {
 		subscriptions[i] = sub
