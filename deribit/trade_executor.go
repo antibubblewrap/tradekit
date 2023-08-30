@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/antibubblewrap/tradekit/internal/websocket"
 	"github.com/valyala/fastjson"
@@ -140,7 +139,6 @@ type liveTradeExecutor struct {
 // and client credentials.
 func NewTradingExecutor(wsUrl string, credentials Credentials) TradingExecutor {
 	ws := websocket.New(wsUrl, nil)
-	ws.PingInterval = time.Second * 15
 
 	return &liveTradeExecutor{
 		ws:              &ws,

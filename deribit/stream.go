@@ -120,22 +120,7 @@ func (s *stream[T, U]) SetCredentials(c *Credentials) {
 }
 
 func (s *stream[T, U]) Start(ctx context.Context) error {
-	var wsOpts websocket.Options
-	if s.opts != nil {
-		if s.opts.BufferCapacity != 0 {
-			wsOpts.BufCapacity = int(s.opts.BufferCapacity)
-		}
-		if s.opts.BufferPoolSize != 0 {
-			wsOpts.PoolSize = int(s.opts.BufferPoolSize)
-		}
-		if s.opts.ResetInterval != 0 {
-			wsOpts.ResetInterval = s.opts.ResetInterval
-		}
-		if s.opts.PingInterval != 0 {
-			wsOpts.PingInterval = s.opts.PingInterval
-		}
-	}
-	ws := websocket.New(s.url, &wsOpts)
+	ws := websocket.New(s.url, s.opts)
 
 	ws.OnConnect = func() error {
 		// Authenticate and wait for the response if the credentials are supplied.

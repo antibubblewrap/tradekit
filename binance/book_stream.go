@@ -118,7 +118,6 @@ func (s *OrderbookStream) Start(ctx context.Context) error {
 	// Websocket setup
 	connecting := make(chan struct{}, 1)
 	ws := websocket.New(s.url, nil)
-	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		connecting <- struct{}{}
 		channels := []string{fmt.Sprintf("%s@depth@100ms", s.symbol)}

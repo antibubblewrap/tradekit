@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/antibubblewrap/tradekit/internal/websocket"
 	"github.com/valyala/fastjson"
@@ -93,7 +92,6 @@ func (s *TradeStream) parseTradeMsg(msg websocket.Message) (Trade, error) {
 func (s *TradeStream) Start(ctx context.Context) error {
 	// Websocket setup
 	ws := websocket.New(s.url, nil)
-	ws.PingInterval = 15 * time.Second
 	ws.OnConnect = func() error {
 		channels := make([]string, len(s.symbols))
 		for i, symbol := range s.symbols {

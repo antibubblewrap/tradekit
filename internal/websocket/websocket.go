@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/antibubblewrap/tradekit"
 	"github.com/gorilla/websocket"
 )
 
@@ -20,7 +21,7 @@ func sleepCtx(ctx context.Context, duration time.Duration) {
 
 // Make a webscoket connection. Retries the connection with exponential backoff if the
 // connection attempt fails.
-func connect(ctx context.Context, url string) (*websocket.Conn, error) {
+func connect(ctx context.Context, url string, enableCompression bool) (*websocket.Conn, error) {
 	sleep := time.Second
 	var err error
 	var conn *websocket.Conn
@@ -31,7 +32,9 @@ loop:
 			break loop
 		default:
 			dialer := websocket.DefaultDialer
-			dialer.EnableCompression = true
+			if enableCompression {
+				dialer.EnableCompression = true
+			}
 			conn, _, err = dialer.DialContext(ctx, url, nil)
 			if err != nil {
 				sleepCtx(ctx, sleep)
@@ -68,79 +71,85 @@ func (m Message) Release() {
 	m.pool.put(m.buf)
 }
 
-type Options struct {
-	PingInterval time.Duration
+// type Options struct {
+// 	EnableCompression bool
 
-	ResetInterval time.Duration
+// 	PingInterval time.Duration
 
-	// PoolSize defines the size of the pool of pre-allocated buffers for storing data
-	// received from the websocket connection. If not set, it will be set to 32 by
-	// default.
-	PoolSize int
-	// BufCapacity sets the initial capacity of buffers in the websocket's buffer pool.
-	// You should set this to be larger than the typical size of a message from the
-	// specific websocket connection to reduce the number of memory allocations. If not
-	// set, it will be set to 2048 bytes by default.
-	BufCapacity int
+// 	ResetInterval time.Duration
+
+// 	// PoolSize defines the size of the pool of pre-allocated buffers for storing data
+// 	// received from the websocket connection. If not set, it will be set to 32 by
+// 	// default.
+// 	PoolSize int
+// 	// BufCapacity sets the initial capacity of buffers in the websocket's buffer pool.
+// 	// You should set this to be larger than the typical size of a message from the
+// 	// specific websocket connection to reduce the number of memory allocations. If not
+// 	// set, it will be set to 2048 bytes by default.
+// 	BufCapacity int
+// }
+
+var defaultOptions tradekit.StreamOptions = tradekit.StreamOptions{
+	EnableCompression: false,
+	PingInterval:      15 * time.Second,
+	ResetInterval:     time.Duration(1<<63 - 1),
+	BufferPoolSize:    32,
+	BufferCapacity:    2048,
 }
 
-var defaultOptions Options = Options{
-	PingInterval: 15 * time.Second,
-	PoolSize:     32,
-	BufCapacity:  2048,
+func setOptionDefaults(opts *tradekit.StreamOptions) tradekit.StreamOptions {
+	if opts == nil {
+		return defaultOptions
+	}
+	res := *opts
+	if res.PingInterval == 0 {
+		res.PingInterval = defaultOptions.PingInterval
+	}
+	if res.ResetInterval == 0 {
+		res.ResetInterval = defaultOptions.ResetInterval
+	}
+	if res.BufferCapacity == 0 {
+		res.BufferCapacity = defaultOptions.BufferCapacity
+	}
+	if res.BufferPoolSize == 0 {
+		res.BufferPoolSize = defaultOptions.BufferPoolSize
+	}
+	return res
 }
 
 // Websocket handles a websocket client connection to a given URL.
 type Websocket struct {
-	Url           string
-	bufPool       *bufferPool
-	responses     chan Message
-	requests      chan []byte
-	close         chan struct{}
-	errc          chan error
-	closed        atomic.Bool
-	wg            sync.WaitGroup
-	OnConnect     func() error
-	ResetInterval time.Duration
-	PingInterval  time.Duration
+	Url       string
+	bufPool   *bufferPool
+	responses chan Message
+	requests  chan []byte
+	close     chan struct{}
+	errc      chan error
+	closed    atomic.Bool
+	wg        sync.WaitGroup
+	OnConnect func() error
+	opts      tradekit.StreamOptions
 }
 
-func New(url string, opts *Options) Websocket {
-	if opts == nil {
-		opts = &defaultOptions
-	}
-	if opts.BufCapacity == 0 {
-		opts.BufCapacity = defaultOptions.BufCapacity
-	}
-	if opts.PoolSize == 0 {
-		opts.PoolSize = defaultOptions.PoolSize
-	}
-	if opts.PingInterval == 0 {
-		opts.PingInterval = defaultOptions.PingInterval
-	}
-
-	resetInterval := time.Hour * 100000
-	if opts.ResetInterval != 0 {
-		resetInterval = opts.ResetInterval
-	}
+func New(url string, opts *tradekit.StreamOptions) Websocket {
+	wsOpts := setOptionDefaults(opts)
 
 	return Websocket{
-		Url:           url,
-		bufPool:       newBufferPool(opts.PoolSize, opts.BufCapacity),
-		responses:     make(chan Message, 10),
-		requests:      make(chan []byte, 10),
-		close:         make(chan struct{}, 1),
-		errc:          make(chan error, 1),
-		OnConnect:     func() error { return nil },
-		ResetInterval: resetInterval,
-		PingInterval:  opts.PingInterval,
+		Url:       url,
+		bufPool:   newBufferPool(wsOpts.BufferPoolSize, wsOpts.BufferCapacity),
+		responses: make(chan Message, 10),
+		requests:  make(chan []byte, 10),
+		close:     make(chan struct{}, 1),
+		errc:      make(chan error, 1),
+		OnConnect: func() error { return nil },
+		opts:      wsOpts,
 	}
 }
 
 func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struct{}) {
 	defer func() { done <- struct{}{} }()
 
-	conn, err := connect(ctx, ws.Url)
+	conn, err := connect(ctx, ws.Url, ws.opts.EnableCompression)
 	if err != nil {
 		errc <- err
 		return
@@ -190,7 +199,7 @@ func (ws *Websocket) run(ctx context.Context, errc chan error, done chan<- struc
 
 	wg.Add(1)
 	go func() {
-		pingTicker := time.NewTicker(ws.PingInterval)
+		pingTicker := time.NewTicker(ws.opts.PingInterval)
 		defer func() {
 			pingTicker.Stop()
 			wg.Done()
@@ -232,8 +241,8 @@ func (ws *Websocket) Start(ctx context.Context) error {
 	// Reconnect on any of these close codes
 	reconnectOn := []int{websocket.CloseNormalClosure, websocket.CloseServiceRestart, websocket.CloseTryAgainLater, websocket.CloseAbnormalClosure}
 
-	resetTicker := time.NewTicker(ws.ResetInterval)
 	go func() {
+		resetTicker := time.NewTicker(ws.opts.ResetInterval)
 		defer func() {
 			ws.closed.Store(true)
 			cancel()
